@@ -25,7 +25,9 @@ async def list_users(db: DbSession) -> Sequence[User]:
 async def get_user(user_id: uuid.UUID, db: DbSession) -> User:
     user = await user_service.get_user(db, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return user
 
 
@@ -33,7 +35,9 @@ async def get_user(user_id: uuid.UUID, db: DbSession) -> User:
 async def update_user(user_id: uuid.UUID, data: UserUpdate, db: DbSession) -> User:
     user = await user_service.update_user(db, user_id, data)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return user
 
 
@@ -41,4 +45,16 @@ async def update_user(user_id: uuid.UUID, data: UserUpdate, db: DbSession) -> Us
 async def delete_user(user_id: uuid.UUID, db: DbSession) -> None:
     deleted = await user_service.delete_user(db, user_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+
+@router.patch("/{user_id}/last-active", response_model=UserRead)
+async def update_last_active(user_id: uuid.UUID, db: DbSession) -> User:
+    user = await user_service.update_user_last_active(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    return user

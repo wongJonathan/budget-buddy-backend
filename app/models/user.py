@@ -17,4 +17,6 @@ class User(UUIDPrimaryKeyMixin, Base):
         ForeignKey("budgets.id", ondelete="SET NULL"),
         default=None,
     )
-    last_active: Mapped[datetime.date] = mapped_column(Date, server_default=text("CURRENT_DATE"))
+    last_active: Mapped[datetime.date] = mapped_column(
+        Date, server_default=text("now()")
+    )

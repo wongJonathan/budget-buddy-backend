@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.expense import ExpenseRead
+
 
 class BudgetCreate(BaseModel):
     user_id: uuid.UUID
@@ -24,3 +26,7 @@ class BudgetRead(BaseModel):
     note: str | None
     is_deleted: bool
     created_at: datetime
+
+
+class BudgetExpensesRead(BudgetRead):
+    expenses: list[ExpenseRead]

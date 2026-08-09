@@ -27,7 +27,7 @@ docker compose restart app                 # picks up host code changes (no --re
 
 **Run Alembic from inside the `app` container, not from the host.** This machine has a native PostgreSQL install already bound to `localhost:5432`, so a host-side `uv run alembic ...` silently connects to *that* instead of the Dockerized Postgres. `docker compose exec app ...` uses the `db` hostname over Docker's internal network and avoids the collision. If `alembic` reports a password/auth error, this is almost always why.
 
-Compose mounts `./app` and `./alembic` into the container, so file edits show up immediately, but the running `uvicorn` process (no `--reload`) needs `docker compose restart app` to pick them up.
+Compose mounts `./app` and `./alembic` into the container, and the `app` service overrides the Dockerfile's `CMD` with `--reload`, so file edits are picked up automatically — no `docker compose restart app` needed. That override is dev-only; the Dockerfile's `CMD` (no `--reload`) is what any real deployment of the built image uses.
 
 ## Architecture
 

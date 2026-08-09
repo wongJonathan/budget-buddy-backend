@@ -61,5 +61,5 @@ class Expense(UUIDPrimaryKeyMixin, Base):
     )
     goal_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)
     goal_date: Mapped[date | None] = mapped_column(Date, default=None)
-    period: Mapped[date] = mapped_column(Date)
+    period: Mapped[date] = mapped_column(Date)  # Meant for roll over calculation
     is_deactivated: Mapped[bool] = mapped_column(default=False, server_default="false")

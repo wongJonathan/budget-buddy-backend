@@ -1,7 +1,8 @@
+import datetime
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import extract, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.expense import Expense
@@ -45,3 +46,20 @@ async def soft_delete_expense(db: AsyncSession, expense_id: uuid.UUID) -> bool:
     expense.is_deactivated = True
     await db.commit()
     return True
+
+
+async def list_budget_expenses(
+    db: AsyncSession, budget_id: uuid.UUID, period: datetime.date, include_deleted: bool
+) -> Sequence[Expense]:
+    conditions = [
+        Expense.budget_id == budget_id,
+        extract("year", Expense.period) == period.year,
+        extract("month", Expense.period) == period.month,
+    ]
+
+    if include_deleted is False:
+        conditions.append(~Expense.is_deactivated)
+
+    result = await db.execute(select(Expense).where(*conditions))
+
+    return result.scalars().all()
