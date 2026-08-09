@@ -99,6 +99,9 @@ async def delete_budget(budget_id: uuid.UUID, db: DbSession) -> None:
 async def json_convert_budget(
     meta: Annotated[str, Form()], file: Annotated[bytes, File()], db: DbSession
 ) -> Budget:
-    metadata = BudgetCreate.model_validate_json(meta)
-    budget = await budget_service.convert_json_to_budget(db, metadata, file)
-    return budget
+    try:
+        metadata = BudgetCreate.model_validate_json(meta)
+        budget = await budget_service.convert_json_to_budget(db, metadata, file)
+        return budget
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
