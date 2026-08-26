@@ -15,8 +15,13 @@ class User(UUIDPrimaryKeyMixin, Base):
     active_budget_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("budgets.id", ondelete="SET NULL"),
-        default=None,
     )
     last_active: Mapped[datetime.date] = mapped_column(
         Date, server_default=text("now()")
+    )
+    email: Mapped[str] = mapped_column(unique=True)
+    hashed_password: Mapped[str]
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
+    password_changed_at: Mapped[datetime.datetime] = mapped_column(
+        server_default=text("now()")
     )
