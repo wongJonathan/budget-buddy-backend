@@ -5,7 +5,9 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.dependencies import DbSession
 from app.models.user import User
-from app.schemas.user import UserCreate, UserRead, UserUpdate
+from app.schemas.budget import BudgetRead
+from app.schemas.user import UserCreate, UserRead, UserUpdate, UserWithBudgetsRead
+from app.services import budget as budget_service
 from app.services import user as user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -21,14 +23,20 @@ async def list_users(db: DbSession) -> Sequence[User]:
     return await user_service.list_users(db)
 
 
-@router.get("/{user_id}", response_model=UserRead)
-async def get_user(user_id: uuid.UUID, db: DbSession) -> User:
+@router.get("/{user_id}", response_model=UserWithBudgetsRead)
+async def get_user(user_id: uuid.UUID, db: DbSession) -> UserWithBudgetsRead:
     user = await user_service.get_user(db, user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    return user
+    budgets = await budget_service.list_budgets(db, user.id)
+    budget_reads = [BudgetRead.model_validate(budget) for budget in budgets]
+
+    return UserWithBudgetsRead(
+        **UserRead.model_validate(user).model_dump(),
+        budgets=budget_reads,
+    )
 
 
 @router.patch("/{user_id}", response_model=UserRead)

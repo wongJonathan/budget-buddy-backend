@@ -59,12 +59,7 @@ async def get_budget(
     expenses = [ExpenseRead.model_validate(expense) for expense in expenses_sequence]
 
     return BudgetExpensesRead(
-        id=budget.id,
-        user_id=budget.user_id,
-        name=budget.name,
-        note=budget.note,
-        is_deleted=budget.is_deleted,
-        created_at=budget.created_at,
+        **BudgetRead.model_validate(budget).model_dump(),
         expenses=expenses,
     )
 
@@ -104,4 +99,6 @@ async def json_convert_budget(
         budget = await budget_service.convert_json_to_budget(db, metadata, file)
         return budget
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e

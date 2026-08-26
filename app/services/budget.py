@@ -32,8 +32,16 @@ async def get_budget(db: AsyncSession, budget_id: uuid.UUID) -> Budget | None:
     return await db.get(Budget, budget_id)
 
 
-async def list_budgets(db: AsyncSession) -> Sequence[Budget]:
-    result = await db.execute(select(Budget).where(~Budget.is_deleted))
+async def list_budgets(
+    db: AsyncSession, user_id: uuid.UUID | None = None, hide_deleted=True
+) -> Sequence[Budget]:
+    conditions = []
+
+    if user_id is not None:
+        conditions.append(Budget.user_id == user_id)
+    if hide_deleted:
+        conditions.append(~Budget.is_deleted)
+    result = await db.execute(select(Budget).where(*conditions))
     return result.scalars().all()
 
 

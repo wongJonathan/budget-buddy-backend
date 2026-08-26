@@ -3,6 +3,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.budget import BudgetRead
+
 
 class UserCreate(BaseModel):
     display_name: str
@@ -21,3 +23,7 @@ class UserRead(BaseModel):
     display_name: str
     active_budget_id: uuid.UUID | None
     last_active: datetime.date
+
+
+class UserWithBudgetsRead(UserRead):
+    budgets: list[BudgetRead]
