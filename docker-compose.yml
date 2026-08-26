@@ -20,7 +20,9 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: budget_buddy
     ports:
-      - "5432:5432"
+      # 5432 on the host is taken by the native PostgreSQL 9.5 install, so
+      # publish on 5433 to keep host-side clients off the wrong server.
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
