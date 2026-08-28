@@ -15,9 +15,7 @@ class AuthEvents(Base):
     __tablename__ = "auth_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    occurred_at: Mapped[datetime.datetime] = mapped_column(
-        server_default=text("now()")
-    )
+    occurred_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
     event_type: Mapped[str] = mapped_column(nullable=False)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),

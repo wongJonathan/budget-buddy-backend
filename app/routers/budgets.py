@@ -38,9 +38,7 @@ async def get_budget(
     include_deleted: bool = False,
 ) -> BudgetExpensesRead:
     try:
-        period_date = (
-            datetime.date.strptime(period, "%Y-%m") if period else datetime.date.today()
-        )
+        period_date = datetime.date.strptime(period, "%Y-%m") if period else datetime.date.today()
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -49,13 +47,9 @@ async def get_budget(
 
     budget = await budget_service.get_budget(db, budget_id)
     if budget is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
 
-    expenses_sequence = await list_budget_expenses(
-        db, budget.id, period_date, include_deleted
-    )
+    expenses_sequence = await list_budget_expenses(db, budget.id, period_date, include_deleted)
     expenses = [ExpenseRead.model_validate(expense) for expense in expenses_sequence]
 
     return BudgetExpensesRead(
@@ -65,14 +59,10 @@ async def get_budget(
 
 
 @router.patch("/{budget_id}", response_model=BudgetRead)
-async def update_budget(
-    budget_id: uuid.UUID, data: BudgetUpdate, db: DbSession
-) -> Budget:
+async def update_budget(budget_id: uuid.UUID, data: BudgetUpdate, db: DbSession) -> Budget:
     budget = await budget_service.update_budget(db, budget_id, data)
     if budget is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
     return budget
 
 
@@ -80,9 +70,7 @@ async def update_budget(
 async def delete_budget(budget_id: uuid.UUID, db: DbSession) -> None:
     deleted = await budget_service.soft_delete_budget(db, budget_id)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
 
 
 # I want to create an endpoint to upload json expense data and it creates the budget
@@ -99,6 +87,4 @@ async def json_convert_budget(
         budget = await budget_service.convert_json_to_budget(db, metadata, file)
         return budget
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

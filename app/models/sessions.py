@@ -17,8 +17,6 @@ class Session(UUIDPrimaryKeyMixin, Base):
     )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
     expires_at: Mapped[datetime.datetime]
-    last_seen_at: Mapped[datetime.datetime] = mapped_column(
-        server_default=text("now()")
-    )
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
     # Used for keep track where the user has logged in
     user_agent: Mapped[str | None]

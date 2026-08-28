@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import os
 import uuid
 from collections.abc import AsyncGenerator, Callable, Sequence
 from decimal import Decimal
@@ -6,9 +8,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-from app.database import get_session
+import app.models  # noqa: F401  registers every model on Base.metadata
+from app.config import get_settings
+from app.database import Base, get_db_session
 from app.main import app
 from app.models.budget import Budget
 from app.models.category import Category
@@ -48,6 +59,14 @@ def _fake_refresh(obj: object) -> None:
         pass  # no server-generated fields besides id
 
 
+def _scalars_result(items: Sequence[object]) -> MagicMock:
+    """A fake `Result` matching the `(await db.execute(select(...))).scalars().all()`
+    pattern every list_* service function uses."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = items
+    return result
+
+
 @pytest.fixture
 def mock_db() -> MagicMock:
     """A MagicMock(spec=AsyncSession) standing in for the real DB connection.
@@ -70,22 +89,19 @@ def mock_db() -> MagicMock:
     db.flush = AsyncMock()
     db.delete = AsyncMock()
     db.get = AsyncMock(return_value=None)
-    db.execute = AsyncMock()
+    # Defaults to an empty result rather than a bare AsyncMock. A bare one hands back
+    # another AsyncMock, so `result.scalars()` returns an un-awaited coroutine and the
+    # service dies with "'coroutine' object has no attribute 'all'" — which points at
+    # the service, not at the test that forgot to stub the query. Tests that care
+    # override this with `make_scalars_result`.
+    db.execute = AsyncMock(return_value=_scalars_result([]))
     return db
 
 
 @pytest.fixture
 def make_scalars_result() -> Callable[[Sequence[object]], MagicMock]:
-    """Builds a fake `Result` for configuring `mock_db.execute.return_value`, matching
-    the `(await db.execute(select(...))).scalars().all()` pattern every list_* service
-    function uses."""
-
-    def _make(items: Sequence[object]) -> MagicMock:
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = items
-        return result
-
-    return _make
+    """Builds a fake `Result` for configuring `mock_db.execute.return_value`."""
+    return _scalars_result
 
 
 @pytest.fixture
@@ -93,8 +109,101 @@ async def client(mock_db: MagicMock) -> AsyncGenerator[AsyncClient]:
     async def _override_get_session() -> AsyncGenerator[AsyncSession]:
         yield mock_db
 
-    app.dependency_overrides[get_session] = _override_get_session
+    app.dependency_overrides[get_db_session] = _override_get_session
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# real-Postgres fixtures
+# ---------------------------------------------------------------------------
+# The mocked `mock_db` above is fine for routers and services whose logic is pure
+# Python, but it cannot see anything the database itself decides: constraints,
+# ON DELETE behaviour, whether a lookup key is even the right *column*. A mocked
+# `db.get(User, email)` happily returns whatever you set, while the real one raises
+# DataError trying to parse an email as a UUID. Anything asserting on those needs a
+# real connection, so it uses the fixtures below.
+#
+# They run against a dedicated `<db>_test` database, created on first use, so a
+# failing run can't leave junk in the dev data. Override with TEST_DATABASE_URL.
+
+
+def _resolve_test_database_url() -> str:
+    override = os.environ.get("TEST_DATABASE_URL")
+    if override:
+        return override
+    url = make_url(get_settings().database_url)
+    return url.set(database=f"{url.database}_test").render_as_string(hide_password=False)
+
+
+async def _provision(url: str) -> None:
+    target = make_url(url)
+
+    # CREATE DATABASE can't run inside a transaction block, hence AUTOCOMMIT, and it
+    # has to be issued from a connection to some *other* database.
+    admin = create_async_engine(target.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        async with admin.connect() as conn:
+            exists = await conn.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": target.database},
+            )
+            if not exists:
+                # The name comes from our own config, not from user input.
+                await conn.execute(text(f'CREATE DATABASE "{target.database}"'))
+    finally:
+        await admin.dispose()
+
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def test_database_url() -> str:
+    """Create the test database and schema once per run.
+
+    Synchronous, driving its own loop via asyncio.run, because pytest-asyncio gives
+    each test a fresh event loop - a session-scoped *async* fixture would leave an
+    engine bound to a loop that closes before the second test runs.
+    """
+    url = _resolve_test_database_url()
+    asyncio.run(_provision(url))
+    return url
+
+
+@pytest.fixture
+async def db_engine(test_database_url: str) -> AsyncGenerator[AsyncEngine]:
+    """An engine on the test database, emptied again on teardown.
+
+    Cleanup hangs off this fixture rather than an autouse one so that the mocked
+    tests, which are the majority, never open a connection at all.
+    """
+    engine = create_async_engine(test_database_url)
+    tables = ", ".join(f'"{name}"' for name in Base.metadata.tables)
+    try:
+        yield engine
+    finally:
+        async with engine.begin() as conn:
+            # CASCADE because users <-> budgets reference each other; RESTART IDENTITY
+            # so auth_events ids don't drift between tests.
+            await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        await engine.dispose()
+
+
+@pytest.fixture
+def db_sessionmaker(db_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+@pytest.fixture
+async def db_session(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncSession]:
+    async with db_sessionmaker() as session:
+        yield session

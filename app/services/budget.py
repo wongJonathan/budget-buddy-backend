@@ -1,8 +1,8 @@
 import datetime
-from decimal import Decimal
 import json
 import uuid
 from collections.abc import Sequence
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,6 @@ from app.models.expense import Expense
 from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.category import CategoryCreate
 from app.schemas.expense import ExpenseCreate
-from app.services.category import create_category
-from app.services.expense import create_expense
 
 _REQUIRED_EXPENSE_KEYS = {"tag", "name", "cost", "frequency", "amountSaved"}
 
@@ -33,7 +31,7 @@ async def get_budget(db: AsyncSession, budget_id: uuid.UUID) -> Budget | None:
 
 
 async def list_budgets(
-    db: AsyncSession, user_id: uuid.UUID | None = None, hide_deleted=True
+    db: AsyncSession, user_id: uuid.UUID | None = None, hide_deleted: bool = True
 ) -> Sequence[Budget]:
     conditions = []
 
@@ -91,9 +89,7 @@ def _get_frequency(frequency: str) -> Frequency:
             raise ValueError(f"{frequency} is not recognized")
 
 
-async def convert_json_to_budget(
-    db: AsyncSession, metadata: BudgetCreate, file: bytes
-) -> Budget:
+async def convert_json_to_budget(db: AsyncSession, metadata: BudgetCreate, file: bytes) -> Budget:
     json_data = json.loads(file)
 
     expenses = []
@@ -107,7 +103,8 @@ async def convert_json_to_budget(
         missing = _REQUIRED_EXPENSE_KEYS - expense_data.keys()
         if missing:
             raise ValueError(
-                f"Expense '{expense_key}' is missing required field(s): {', '.join(sorted(missing))}"
+                f"Expense '{expense_key}' is missing required field(s): "
+                f"{', '.join(sorted(missing))}"
             )
 
         category_names.add(expense_data["tag"])

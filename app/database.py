@@ -34,6 +34,6 @@ class UUIDPrimaryKeyMixin:
     )
 
 
-async def get_session() -> AsyncGenerator[AsyncSession]:
+async def get_db_session() -> AsyncGenerator[AsyncSession]:
     async with async_session_factory() as session:
         yield session

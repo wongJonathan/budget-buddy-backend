@@ -17,7 +17,7 @@ async def create_expense(data: ExpenseCreate, db: DbSession) -> Expense:
 
 
 @router.post("/bulk", status_code=status.HTTP_201_CREATED)
-async def create_bulk_expenses(data: list[ExpenseCreate], db: DbSession):
+async def create_bulk_expenses(data: list[ExpenseCreate], db: DbSession) -> None:
     await expense_service.create_bulk_expenses(db, data)
 
 
@@ -30,21 +30,15 @@ async def list_expenses(db: DbSession) -> Sequence[Expense]:
 async def get_expense(expense_id: uuid.UUID, db: DbSession) -> Expense:
     expense = await expense_service.get_expense(db, expense_id)
     if expense is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
     return expense
 
 
 @router.patch("/{expense_id}", response_model=ExpenseRead)
-async def update_expense(
-    expense_id: uuid.UUID, data: ExpenseUpdate, db: DbSession
-) -> Expense:
+async def update_expense(expense_id: uuid.UUID, data: ExpenseUpdate, db: DbSession) -> Expense:
     expense = await expense_service.update_expense(db, expense_id, data)
     if expense is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
     return expense
 
 
@@ -52,6 +46,4 @@ async def update_expense(
 async def delete_expense(expense_id: uuid.UUID, db: DbSession) -> None:
     deleted = await expense_service.soft_delete_expense(db, expense_id)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")

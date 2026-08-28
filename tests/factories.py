@@ -11,6 +11,8 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+from fastapi import Request
+
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.enums import Frequency, TransactionType
@@ -25,9 +27,34 @@ def make_user(**overrides: Any) -> User:
         "display_name": "Test User",
         "active_budget_id": None,
         "last_active": datetime.date.today(),
+        # NOT NULL in the real table, so these have to be present for any test that
+        # actually inserts the row. The email is randomised because it's UNIQUE.
+        "email": f"user-{uuid.uuid4().hex[:12]}@example.com",
+        "hashed_password": "not-a-real-hash",
     }
     defaults.update(overrides)
     return User(**defaults)
+
+
+def make_request(
+    headers: dict[str, str] | None = None,
+    method: str = "POST",
+    client: tuple[str, int] | None = ("127.0.0.1", 54321),
+) -> Request:
+    """A Request built straight from an ASGI scope - no app, no transport.
+
+    For unit-testing the handful of functions that read raw headers or the peer
+    address (`audit.client_ip`, `csrf.origin_check`) without standing up a client.
+    """
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": "/",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+            "client": client,
+        }
+    )
 
 
 def make_budget(**overrides: Any) -> Budget:

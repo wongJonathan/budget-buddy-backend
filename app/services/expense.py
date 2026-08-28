@@ -17,7 +17,7 @@ async def create_expense(db: AsyncSession, data: ExpenseCreate) -> Expense:
     return expense
 
 
-async def create_bulk_expenses(db: AsyncSession, data: list[ExpenseCreate]):
+async def create_bulk_expenses(db: AsyncSession, data: list[ExpenseCreate]) -> None:
     for expense_data in data:
         expense = Expense(**expense_data.model_dump())
         db.add(expense)
