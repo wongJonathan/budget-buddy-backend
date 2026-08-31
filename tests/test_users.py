@@ -7,18 +7,6 @@ from httpx import AsyncClient
 from tests.factories import make_budget, make_user
 
 
-async def test_create_user(client: AsyncClient, mock_db: MagicMock) -> None:
-    response = await client.post("/users", json={"display_name": "Alice"})
-
-    assert response.status_code == 201
-    body = response.json()
-    assert body["display_name"] == "Alice"
-    assert body["active_budget_id"] is None
-    assert uuid.UUID(body["id"])
-    mock_db.add.assert_called_once()
-    mock_db.commit.assert_awaited_once()
-
-
 async def test_list_users(
     client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:

@@ -6,16 +6,15 @@ from fastapi import APIRouter, HTTPException, status
 from app.dependencies import DbSession
 from app.models.user import User
 from app.schemas.budget import BudgetRead
-from app.schemas.user import UserCreate, UserRead, UserUpdate, UserWithBudgetsRead
+from app.schemas.user import UserRead, UserUpdate, UserWithBudgetsRead
 from app.services import budget as budget_service
 from app.services import user as user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def create_user(data: UserCreate, db: DbSession) -> User:
-    return await user_service.create_user(db, data)
+# No POST: accounts are provisioned by app.scripts.create_user, never over HTTP.
+# See docs/adr/0006-accounts-provisioned-by-script.md.
 
 
 @router.get("", response_model=list[UserRead])

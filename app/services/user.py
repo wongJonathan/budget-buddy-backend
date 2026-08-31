@@ -6,15 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate
-
-
-async def create_user(db: AsyncSession, data: UserCreate) -> User:
-    user = User(**data.model_dump())
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+from app.schemas.user import UserUpdate
 
 
 async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:

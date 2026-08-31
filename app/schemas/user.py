@@ -6,11 +6,6 @@ from pydantic import BaseModel, ConfigDict
 from app.schemas.budget import BudgetRead
 
 
-class UserCreate(BaseModel):
-    display_name: str
-    active_budget_id: uuid.UUID | None = None
-
-
 class UserUpdate(BaseModel):
     display_name: str | None = None
     active_budget_id: uuid.UUID | None = None

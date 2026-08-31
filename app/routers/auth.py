@@ -16,7 +16,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def login(
     data: LoginRequest, response: Response, request: Request, db: DbSession
 ) -> dict[str, Any]:
-    email = data.email.strip().lower()
+    email = data.email
     password = data.password.get_secret_value()
 
     user = await user_service.get_user_by_email(db, email)

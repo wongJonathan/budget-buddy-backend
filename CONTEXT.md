@@ -5,7 +5,11 @@ A personal budgeting backend: users track planned expenses against budgets, orga
 ## Language
 
 **User**:
-An individual account holder. Owns Budgets and Categories, and points at the one it currently has open via `active_budget_id`.
+An individual account holder. Owns Budgets and Categories, and points at the one it currently has open via `active_budget_id`. Created only by Provisioning.
+
+**Provisioning**:
+Creating a User account. Always an operator action, never self-service — there is no registration and no route that creates a User. A provisioned account arrives with a blank Budget already active, so a User is never in the state of having no Budget at all. The password set at Provisioning is meant to be temporary, replaced by its owner on first sign-in; nothing enforces that yet.
+_Avoid_: "signup", "registration" — nothing here is self-service, and the account holder is not the one who creates the account.
 
 **Budget**:
 A named collection of Expenses belonging to a User, rolled forward period by period. A Budget has no stored "active" state of its own — it is active only when `User.active_budget_id` points at it. Soft-deleted via `is_deleted`, never hard-deleted.
@@ -30,4 +34,4 @@ The real DATE marking which month an Expense instance belongs to. Drives Rollove
 The mechanism that instantiates next-period Expense rows from the prior period: exact match on the target Period reuses existing rows, otherwise it walks forward month-by-month from the latest existing Period for that Budget. Handles first-activation and multi-month gaps the same way.
 
 **Activation**:
-Making a Budget the User's current one (`User.active_budget_id`). Activation instantiates fresh Expense rows for the Budget rather than flipping a status flag, so a draft Budget and a live Budget stay fully independent copies.
+Making a Budget the User's current one (`User.active_budget_id`). Activation instantiates fresh Expense rows for the Budget rather than flipping a status flag, so a draft Budget and a live Budget stay fully independent copies. Provisioning is the one other thing that sets `active_budget_id`: the Budget it seeds is blank, so there are no Expense rows for Activation to instantiate. Everything after that goes through Activation.

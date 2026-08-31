@@ -1,6 +1,8 @@
 from pydantic import BaseModel, SecretStr
 
+from app.schemas.fields import NormalizedEmail
+
 
 class LoginRequest(BaseModel):
-    email: str
+    email: NormalizedEmail
     password: SecretStr
