@@ -34,3 +34,4 @@ class TransactionRead(BaseModel):
     note: str | None
     date: datetime.date
     transfer_id: uuid.UUID | None
+    is_deleted: bool

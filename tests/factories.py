@@ -10,6 +10,7 @@ import datetime
 import uuid
 from decimal import Decimal
 from typing import Any
+from unittest.mock import MagicMock
 
 from fastapi import Request
 
@@ -98,7 +99,7 @@ def make_expense(**overrides: Any) -> Expense:
         "goal_amount": None,
         "goal_date": None,
         "period": datetime.date.today(),
-        "is_deactivated": False,
+        "is_deleted": False,
     }
     defaults.update(overrides)
     return Expense(**defaults)
@@ -113,6 +114,23 @@ def make_transaction(**overrides: Any) -> Transaction:
         "note": None,
         "date": datetime.date.today(),
         "transfer_id": None,
+        "is_deleted": False,
     }
     defaults.update(overrides)
     return Transaction(**defaults)
+
+
+def make_scalars_one(obj: object | None) -> MagicMock:
+    """A fake `ScalarResult` for stubbing `mock_db.scalars`.
+
+    Distinct from the `make_scalars_result` fixture, which fakes the `Result` returned
+    by `db.execute` and is consumed as `.scalars().all()`. This one fakes what
+    `db.scalars` returns directly, consumed as `.one_or_none()` - the shape every
+    get_* service uses now that fetch-by-id goes through a visibility-filtered
+    select() rather than db.get().
+    """
+    result = MagicMock()
+    result.one_or_none.return_value = obj
+    result.first.return_value = obj
+    result.all.return_value = [] if obj is None else [obj]
+    return result

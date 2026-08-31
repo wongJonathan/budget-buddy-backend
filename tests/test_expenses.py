@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
-from tests.factories import make_expense
+from tests.factories import make_expense, make_scalars_one
 
 
 def _expense_payload(**overrides: object) -> dict[str, object]:
@@ -45,7 +45,7 @@ async def test_create_expense_optional_fields_default(
     assert body["note"] is None
     assert body["goal_amount"] is None
     assert body["goal_date"] is None
-    assert body["is_deactivated"] is False
+    assert body["is_deleted"] is False
 
 
 async def test_list_expenses(
@@ -63,7 +63,7 @@ async def test_list_expenses(
 
 async def test_get_expense_found(client: AsyncClient, mock_db: MagicMock) -> None:
     expense = make_expense(name="Groceries")
-    mock_db.get.return_value = expense
+    mock_db.scalars.return_value = make_scalars_one(expense)
 
     response = await client.get(f"/expenses/{expense.id}")
 
@@ -72,7 +72,7 @@ async def test_get_expense_found(client: AsyncClient, mock_db: MagicMock) -> Non
 
 
 async def test_get_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.get(f"/expenses/{uuid.uuid4()}")
 
@@ -81,7 +81,7 @@ async def test_get_expense_not_found(client: AsyncClient, mock_db: MagicMock) ->
 
 async def test_update_expense_found(client: AsyncClient, mock_db: MagicMock) -> None:
     expense = make_expense(name="Groceries")
-    mock_db.get.return_value = expense
+    mock_db.scalars.return_value = make_scalars_one(expense)
 
     response = await client.patch(f"/expenses/{expense.id}", json={"name": "Food"})
 
@@ -91,7 +91,7 @@ async def test_update_expense_found(client: AsyncClient, mock_db: MagicMock) -> 
 
 
 async def test_update_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.patch(f"/expenses/{uuid.uuid4()}", json={"name": "Food"})
 
@@ -99,19 +99,19 @@ async def test_update_expense_not_found(client: AsyncClient, mock_db: MagicMock)
 
 
 async def test_delete_expense_is_soft_delete(client: AsyncClient, mock_db: MagicMock) -> None:
-    expense = make_expense(is_deactivated=False)
-    mock_db.get.return_value = expense
+    expense = make_expense(is_deleted=False)
+    mock_db.scalars.return_value = make_scalars_one(expense)
 
     response = await client.delete(f"/expenses/{expense.id}")
 
     assert response.status_code == 204
-    assert expense.is_deactivated is True
+    assert expense.is_deleted is True
     mock_db.delete.assert_not_called()
     mock_db.commit.assert_awaited_once()
 
 
 async def test_delete_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.delete(f"/expenses/{uuid.uuid4()}")
 

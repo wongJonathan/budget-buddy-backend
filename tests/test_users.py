@@ -1,103 +1,151 @@
+"""Tests for app/routers/users.py.
+
+Every route here is authenticated and acts on the *current* user. None of them takes
+a user id in a position the handler reads, so a request can only ever affect the
+account it is authenticated as - there is no "delete someone else" shape to test for.
+
+Each route therefore gets two tests: the authenticated behaviour via `authed_client`,
+and the 401 via the plain `client`, which presents no session.
+"""
+
+import datetime
 import uuid
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
-from tests.factories import make_budget, make_user
+from app.models.user import User
+from tests.factories import make_budget
+
+# ---------------------------------------------------------------------------
+# GET /users
+# ---------------------------------------------------------------------------
 
 
-async def test_list_users(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+async def test_get_user_returns_the_current_user_with_their_budgets(
+    authed_client: AsyncClient,
+    mock_db: MagicMock,
+    current_user: User,
+    make_scalars_result: Callable[..., MagicMock],
 ) -> None:
-    users = [make_user(display_name="Alice"), make_user(display_name="Bob")]
-    mock_db.execute.return_value = make_scalars_result(users)
-
-    response = await client.get("/users")
-
-    assert response.status_code == 200
-    names = {u["display_name"] for u in response.json()}
-    assert names == {"Alice", "Bob"}
-
-
-async def test_get_user_found(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
-) -> None:
-    user = make_user(display_name="Alice")
-    mock_db.get.return_value = user
-    # This route serves the user *and* their budgets, so it makes a second, select()-based
-    # query after the get() — that one needs its own stubbed result.
     mock_db.execute.return_value = make_scalars_result(
-        [make_budget(user_id=user.id, name="Groceries")]
+        [make_budget(user_id=current_user.id, name="Groceries")]
     )
 
-    response = await client.get(f"/users/{user.id}")
+    response = await authed_client.get("/users")
 
     assert response.status_code == 200
     body = response.json()
+    assert body["id"] == str(current_user.id)
     assert body["display_name"] == "Alice"
     assert [budget["name"] for budget in body["budgets"]] == ["Groceries"]
 
 
-async def test_get_user_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+async def test_get_user_with_no_budgets_returns_an_empty_list(
+    authed_client: AsyncClient,
+) -> None:
+    """A freshly provisioned account has one Budget, but a user who deleted it has
+    none - and that has to serialise rather than 500."""
+    response = await authed_client.get("/users")
 
-    response = await client.get(f"/users/{uuid.uuid4()}")
+    assert response.status_code == 200
+    assert response.json()["budgets"] == []
 
-    assert response.status_code == 404
+
+async def test_get_user_requires_a_session(client: AsyncClient) -> None:
+    response = await client.get("/users")
+
+    assert response.status_code == 401
 
 
-async def test_update_user_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    user = make_user(display_name="Alice")
-    mock_db.get.return_value = user
+# ---------------------------------------------------------------------------
+# PATCH /users
+# ---------------------------------------------------------------------------
 
-    response = await client.patch(f"/users/{user.id}", json={"display_name": "Alicia"})
+
+async def test_update_user_changes_the_current_user(
+    authed_client: AsyncClient, mock_db: MagicMock, current_user: User
+) -> None:
+    response = await authed_client.patch("/users", json={"display_name": "Alicia"})
 
     assert response.status_code == 200
     assert response.json()["display_name"] == "Alicia"
+    assert current_user.display_name == "Alicia"
     mock_db.commit.assert_awaited_once()
 
 
-async def test_update_user_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+async def test_update_user_ignores_fields_that_were_not_sent(
+    authed_client: AsyncClient, current_user: User
+) -> None:
+    """`exclude_unset` - an omitted field must stay as it was, not become None."""
+    current_user.active_budget_id = uuid.uuid4()
+    original = current_user.active_budget_id
 
-    response = await client.patch(f"/users/{uuid.uuid4()}", json={"display_name": "Alicia"})
+    await authed_client.patch("/users", json={"display_name": "Alicia"})
 
-    assert response.status_code == 404
+    assert current_user.active_budget_id == original
 
 
-async def test_delete_user_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    user = make_user()
-    mock_db.get.return_value = user
+async def test_update_user_requires_a_session(client: AsyncClient) -> None:
+    response = await client.patch("/users", json={"display_name": "Alicia"})
 
-    response = await client.delete(f"/users/{user.id}")
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DELETE /users
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_user_erases_the_current_account(
+    authed_client: AsyncClient, mock_db: MagicMock, current_user: User
+) -> None:
+    response = await authed_client.delete("/users")
 
     assert response.status_code == 204
-    mock_db.delete.assert_awaited_once_with(user)
+    mock_db.delete.assert_awaited_once_with(current_user)
     mock_db.commit.assert_awaited_once()
 
 
-async def test_delete_user_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+async def test_delete_user_clears_budgets_then_categories_first(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """The order is forced by the schema, not a preference: expenses.category_id is
+    ON DELETE RESTRICT and checked immediately, so deleting the User outright is
+    refused while their Expenses still reference their Categories. Budgets go first
+    (taking Expenses and Transactions), which frees the Categories. See ADR 0007.
+    """
+    await authed_client.delete("/users")
 
-    response = await client.delete(f"/users/{uuid.uuid4()}")
+    deleted_tables = [str(call.args[0].table) for call in mock_db.execute.call_args_list]
+    assert deleted_tables == ["budgets", "categories"]
 
-    assert response.status_code == 404
+
+async def test_delete_user_requires_a_session(client: AsyncClient) -> None:
+    response = await client.delete("/users")
+
+    assert response.status_code == 401
 
 
-async def test_update_last_active_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    user = make_user()
-    mock_db.get.return_value = user
+# ---------------------------------------------------------------------------
+# PATCH /users/{user_id}/last-active
+# ---------------------------------------------------------------------------
 
-    response = await client.patch(f"/users/{user.id}/last-active")
+
+async def test_update_last_active_touches_the_current_user(
+    authed_client: AsyncClient, mock_db: MagicMock, current_user: User
+) -> None:
+    current_user.last_active = datetime.date(2020, 1, 1)
+
+    response = await authed_client.patch(f"/users/{current_user.id}/last-active")
 
     assert response.status_code == 200
+    assert current_user.last_active == datetime.date.today()
     mock_db.commit.assert_awaited_once()
 
 
-async def test_update_last_active_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
-
+async def test_update_last_active_requires_a_session(client: AsyncClient) -> None:
     response = await client.patch(f"/users/{uuid.uuid4()}/last-active")
 
-    assert response.status_code == 404
+    assert response.status_code == 401

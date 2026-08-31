@@ -14,6 +14,7 @@ from app.models.expense import Expense
 from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.category import CategoryCreate
 from app.schemas.expense import ExpenseCreate
+from app.services.visibility import live_budgets
 
 _REQUIRED_EXPENSE_KEYS = {"tag", "name", "cost", "frequency", "amountSaved"}
 
@@ -27,26 +28,26 @@ async def create_budget(db: AsyncSession, data: BudgetCreate) -> Budget:
 
 
 async def get_budget(db: AsyncSession, budget_id: uuid.UUID) -> Budget | None:
-    return await db.get(Budget, budget_id)
+    # Not db.get(): a soft-deleted Budget must be unreachable by direct id too, not
+    # merely absent from lists.
+    result = await db.scalars(live_budgets().where(Budget.id == budget_id))
+    return result.one_or_none()
 
 
 async def list_budgets(
     db: AsyncSession, user_id: uuid.UUID | None = None, hide_deleted: bool = True
 ) -> Sequence[Budget]:
-    conditions = []
-
+    query = live_budgets(include_deleted=not hide_deleted)
     if user_id is not None:
-        conditions.append(Budget.user_id == user_id)
-    if hide_deleted:
-        conditions.append(~Budget.is_deleted)
-    result = await db.execute(select(Budget).where(*conditions))
+        query = query.where(Budget.user_id == user_id)
+    result = await db.execute(query)
     return result.scalars().all()
 
 
 async def update_budget(
     db: AsyncSession, budget_id: uuid.UUID, data: BudgetUpdate
 ) -> Budget | None:
-    budget = await db.get(Budget, budget_id)
+    budget = await get_budget(db, budget_id)
     if budget is None:
         return None
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -57,7 +58,9 @@ async def update_budget(
 
 
 async def soft_delete_budget(db: AsyncSession, budget_id: uuid.UUID) -> bool:
-    budget = await db.get(Budget, budget_id)
+    # Via get_budget, so deleting an already-deleted Budget is a 404 rather than a
+    # silent second success.
+    budget = await get_budget(db, budget_id)
     if budget is None:
         return False
     budget.is_deleted = True

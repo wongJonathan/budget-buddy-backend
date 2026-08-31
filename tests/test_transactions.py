@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
-from tests.factories import make_transaction
+from tests.factories import make_scalars_one, make_transaction
 
 
 def _transaction_payload(**overrides: object) -> dict[str, object]:
@@ -58,7 +58,7 @@ async def test_list_transactions(
 
 async def test_get_transaction_found(client: AsyncClient, mock_db: MagicMock) -> None:
     transaction = make_transaction(note="Weekly shop")
-    mock_db.get.return_value = transaction
+    mock_db.scalars.return_value = make_scalars_one(transaction)
 
     response = await client.get(f"/transactions/{transaction.id}")
 
@@ -67,7 +67,7 @@ async def test_get_transaction_found(client: AsyncClient, mock_db: MagicMock) ->
 
 
 async def test_get_transaction_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.get(f"/transactions/{uuid.uuid4()}")
 
@@ -76,7 +76,7 @@ async def test_get_transaction_not_found(client: AsyncClient, mock_db: MagicMock
 
 async def test_update_transaction_found(client: AsyncClient, mock_db: MagicMock) -> None:
     transaction = make_transaction(amount=Decimal("10"))
-    mock_db.get.return_value = transaction
+    mock_db.scalars.return_value = make_scalars_one(transaction)
 
     response = await client.patch(f"/transactions/{transaction.id}", json={"amount": "15.00"})
 
@@ -86,26 +86,29 @@ async def test_update_transaction_found(client: AsyncClient, mock_db: MagicMock)
 
 
 async def test_update_transaction_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.patch(f"/transactions/{uuid.uuid4()}", json={"amount": "15.00"})
 
     assert response.status_code == 404
 
 
-async def test_delete_transaction_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    transaction = make_transaction()
-    mock_db.get.return_value = transaction
+async def test_delete_transaction_is_soft_delete(
+    client: AsyncClient, mock_db: MagicMock
+) -> None:
+    transaction = make_transaction(is_deleted=False)
+    mock_db.scalars.return_value = make_scalars_one(transaction)
 
     response = await client.delete(f"/transactions/{transaction.id}")
 
     assert response.status_code == 204
-    mock_db.delete.assert_awaited_once_with(transaction)
+    assert transaction.is_deleted is True
+    mock_db.delete.assert_not_called()  # the row stays; only the flag moves
     mock_db.commit.assert_awaited_once()
 
 
 async def test_delete_transaction_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.delete(f"/transactions/{uuid.uuid4()}")
 

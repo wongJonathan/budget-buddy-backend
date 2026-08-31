@@ -9,7 +9,7 @@ from httpx import AsyncClient
 
 from app.services import budget as budget_service
 from app.services.budget import _get_frequency
-from tests.factories import make_budget, make_category, make_expense
+from tests.factories import make_budget, make_category, make_expense, make_scalars_one
 
 # ---------------------------------------------------------------------------
 # Router: create / list / update / delete
@@ -45,7 +45,7 @@ async def test_list_budgets(
 
 async def test_update_budget_found(client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget(name="Old name")
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
 
     response = await client.patch(f"/budgets/{budget.id}", json={"name": "New name"})
 
@@ -55,7 +55,7 @@ async def test_update_budget_found(client: AsyncClient, mock_db: MagicMock) -> N
 
 
 async def test_update_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.patch(f"/budgets/{uuid.uuid4()}", json={"name": "New name"})
 
@@ -64,7 +64,7 @@ async def test_update_budget_not_found(client: AsyncClient, mock_db: MagicMock) 
 
 async def test_delete_budget_is_soft_delete(client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget(is_deleted=False)
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
 
     response = await client.delete(f"/budgets/{budget.id}")
 
@@ -75,7 +75,7 @@ async def test_delete_budget_is_soft_delete(client: AsyncClient, mock_db: MagicM
 
 
 async def test_delete_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.delete(f"/budgets/{uuid.uuid4()}")
 
@@ -88,7 +88,7 @@ async def test_delete_budget_not_found(client: AsyncClient, mock_db: MagicMock) 
 
 
 async def test_get_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
-    mock_db.get.return_value = None
+    mock_db.scalars.return_value = make_scalars_one(None)
 
     response = await client.get(f"/budgets/{uuid.uuid4()}")
 
@@ -97,7 +97,7 @@ async def test_get_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> 
 
 async def test_get_budget_invalid_period_format(client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget()
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
 
     response = await client.get(f"/budgets/{budget.id}?period=not-a-period")
 
@@ -108,7 +108,7 @@ async def test_get_budget_with_expenses(
     client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:
     budget = make_budget(name="Groceries Budget")
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
     mock_db.execute.return_value = make_scalars_result(
         [make_expense(name="Milk"), make_expense(name="Bread")]
     )
@@ -127,7 +127,7 @@ async def test_get_budget_no_expenses_this_period_is_200_not_404(
     """A budget with nothing planned for the resolved period is a legitimate empty
     state, not a 404 — 404 stays reserved for 'budget doesn't exist'."""
     budget = make_budget()
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
     mock_db.execute.return_value = make_scalars_result([])
 
     response = await client.get(f"/budgets/{budget.id}")
@@ -138,7 +138,7 @@ async def test_get_budget_no_expenses_this_period_is_200_not_404(
 
 async def test_get_budget_default_period_is_today(client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget()
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
 
     with patch(
         "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])
@@ -156,7 +156,7 @@ async def test_get_budget_explicit_period_and_include_deleted(
     client: AsyncClient, mock_db: MagicMock
 ) -> None:
     budget = make_budget()
-    mock_db.get.return_value = budget
+    mock_db.scalars.return_value = make_scalars_one(budget)
 
     with patch(
         "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])

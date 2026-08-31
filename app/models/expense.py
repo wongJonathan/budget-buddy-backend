@@ -50,12 +50,16 @@ class Expense(UUIDPrimaryKeyMixin, Base):
     name: Mapped[str] = mapped_column()
     note: Mapped[str | None] = mapped_column(default=None)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    frequency: Mapped[Frequency] = mapped_column(pg_enum(Frequency, "expense_frequency"))
+    frequency: Mapped[Frequency] = mapped_column(
+        pg_enum(Frequency, "expense_frequency")
+    )
     monthly_cost: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), Computed(_MONTHLY_COST_EXPR, persisted=True)
     )
-    amount_saved: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    amount_saved: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=0, server_default="0"
+    )
     goal_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)
     goal_date: Mapped[date | None] = mapped_column(Date, default=None)
     period: Mapped[date] = mapped_column(Date)  # Meant for roll over calculation
-    is_deactivated: Mapped[bool] = mapped_column(default=False, server_default="false")
+    is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")

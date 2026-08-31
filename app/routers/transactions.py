@@ -41,6 +41,6 @@ async def update_transaction(
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_transaction(transaction_id: uuid.UUID, db: DbSession) -> None:
-    deleted = await transaction_service.delete_transaction(db, transaction_id)
+    deleted = await transaction_service.soft_delete_transaction(db, transaction_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")

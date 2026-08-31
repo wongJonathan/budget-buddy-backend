@@ -20,12 +20,14 @@ from sqlalchemy.ext.asyncio import (
 import app.models  # noqa: F401  registers every model on Base.metadata
 from app.config import get_settings
 from app.database import Base, get_db_session
+from app.dependencies import get_current_user
 from app.main import app
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 from app.models.user import User
+from tests.factories import make_scalars_one, make_user
 
 
 def _fake_refresh(obj: object) -> None:
@@ -46,8 +48,8 @@ def _fake_refresh(obj: object) -> None:
             obj.series_id = uuid.uuid4()
         if obj.amount_saved is None:
             obj.amount_saved = Decimal("0")
-        if obj.is_deactivated is None:
-            obj.is_deactivated = False
+        if obj.is_deleted is None:
+            obj.is_deleted = False
         if obj.monthly_cost is None:
             # NOT COVERED: mocked session, see checklist.md — real value is a
             # Postgres GENERATED column, not computable here.
@@ -55,7 +57,10 @@ def _fake_refresh(obj: object) -> None:
     elif isinstance(obj, User):
         if obj.last_active is None:
             obj.last_active = datetime.date.today()
-    elif isinstance(obj, Category | Transaction):
+    elif isinstance(obj, Transaction):
+        if obj.is_deleted is None:
+            obj.is_deleted = False
+    elif isinstance(obj, Category):
         pass  # no server-generated fields besides id
 
 
@@ -95,6 +100,10 @@ def mock_db() -> MagicMock:
     # the service, not at the test that forgot to stub the query. Tests that care
     # override this with `make_scalars_result`.
     db.execute = AsyncMock(return_value=_scalars_result([]))
+    # Fetch-by-id now goes through db.scalars(select(...)) rather than db.get, so this
+    # needs a default for the same reason execute does - a bare AsyncMock would hand
+    # back a coroutine from .one_or_none().
+    db.scalars = AsyncMock(return_value=make_scalars_one(None))
     return db
 
 
@@ -110,6 +119,37 @@ async def client(mock_db: MagicMock) -> AsyncGenerator[AsyncClient]:
         yield mock_db
 
     app.dependency_overrides[get_db_session] = _override_get_session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def current_user() -> User:
+    """The account an `authed_client` request is authenticated as."""
+    return make_user(display_name="Alice")
+
+
+@pytest.fixture
+async def authed_client(
+    mock_db: MagicMock, current_user: User
+) -> AsyncGenerator[AsyncClient]:
+    """A client whose requests arrive already authenticated as `current_user`.
+
+    Overrides `get_current_user` rather than planting a session cookie: resolving a
+    real cookie would run sessions.py against the mocked DB, which is a different
+    module's job to test. Use the plain `client` fixture to assert the 401 path.
+    """
+
+    async def _override_get_session() -> AsyncGenerator[AsyncSession]:
+        yield mock_db
+
+    async def _override_current_user() -> User:
+        return current_user
+
+    app.dependency_overrides[get_db_session] = _override_get_session
+    app.dependency_overrides[get_current_user] = _override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -133,12 +173,24 @@ async def client(mock_db: MagicMock) -> AsyncGenerator[AsyncClient]:
 def _resolve_test_database_url() -> str:
     override = os.environ.get("TEST_DATABASE_URL")
     if override:
+        # Explicit opt-in. Note the schema is dropped and rebuilt on it every run.
         return override
     url = make_url(get_settings().database_url)
     return url.set(database=f"{url.database}_test").render_as_string(hide_password=False)
 
 
+def _guard_against_wiping_a_real_database(url: str) -> None:
+    """_provision drops every table, so refuse anything that isn't clearly a test DB."""
+    name = make_url(url).database or ""
+    if not name.endswith("_test") and not os.environ.get("TEST_DATABASE_URL"):
+        raise RuntimeError(
+            f"Refusing to drop tables in {name!r}: expected a database whose name ends "
+            "in '_test'. Set TEST_DATABASE_URL if this is deliberate."
+        )
+
+
 async def _provision(url: str) -> None:
+    _guard_against_wiping_a_real_database(url)
     target = make_url(url)
 
     # CREATE DATABASE can't run inside a transaction block, hence AUTOCOMMIT, and it
@@ -159,6 +211,17 @@ async def _provision(url: str) -> None:
     engine = create_async_engine(url)
     try:
         async with engine.begin() as conn:
+            # Wipe the schema before rebuilding. create_all only creates *missing*
+            # tables and never alters existing ones, so without this the database
+            # silently keeps whatever schema it was first built with and every later
+            # model change surfaces as a confusing "column does not exist".
+            #
+            # DROP SCHEMA rather than metadata.drop_all: users and budgets reference
+            # each other, and drop_all can't order a cycle (the same circular-FK
+            # problem the migrations have). Dropping the schema sidesteps ordering,
+            # and takes the enum types with it so create_all can remake them.
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
             await conn.run_sync(Base.metadata.create_all)
     finally:
         await engine.dispose()

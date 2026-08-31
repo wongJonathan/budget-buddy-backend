@@ -16,12 +16,17 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
     expense_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("expenses.id", ondelete="CASCADE")
     )
-    type: Mapped[TransactionType] = mapped_column(pg_enum(TransactionType, "transaction_type"))
+    type: Mapped[TransactionType] = mapped_column(
+        pg_enum(TransactionType, "transaction_type")
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
     # `datetime` module (not `from datetime import date`) avoids this field's own
     # name shadowing the type in PEP 649 deferred annotation evaluation.
     date: Mapped[datetime.date] = mapped_column(Date)
+    is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")
     transfer_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("transactions.id", ondelete="SET NULL"), default=None
+        PGUUID(as_uuid=True),
+        ForeignKey("transactions.id", ondelete="SET NULL"),
+        default=None,
     )

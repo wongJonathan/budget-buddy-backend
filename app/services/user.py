@@ -1,16 +1,13 @@
 import datetime
-import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.budget import Budget
+from app.models.category import Category
 from app.models.user import User
 from app.schemas.user import UserUpdate
-
-
-async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
-    return await db.get(User, user_id)
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
@@ -27,8 +24,7 @@ async def list_users(db: AsyncSession) -> Sequence[User]:
     return result.scalars().all()
 
 
-async def update_user(db: AsyncSession, user_id: uuid.UUID, data: UserUpdate) -> User | None:
-    user = await db.get(User, user_id)
+async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User | None:
     if user is None:
         return None
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -38,17 +34,34 @@ async def update_user(db: AsyncSession, user_id: uuid.UUID, data: UserUpdate) ->
     return user
 
 
-async def delete_user(db: AsyncSession, user_id: uuid.UUID) -> bool:
-    user = await db.get(User, user_id)
-    if user is None:
-        return False
+async def delete_user(
+    db: AsyncSession,
+    user: User,
+) -> bool:
+    """Erase an account and everything it owns.
+
+    The teardown order is forced by `expenses.category_id`, which is ON DELETE
+    RESTRICT so that deleting a mere label can't destroy the Expenses using it. That
+    check fires immediately, so a bare `DELETE FROM users` is refused: the cascade
+    reaches the user's Categories while their Expenses still point at them. Removing
+    the Budgets first takes the Expenses (and their Transactions) with them, which
+    frees the Categories to go.
+
+    `auth_events` deliberately survives this - only its `user_id` is nulled, by the
+    FK's ON DELETE SET NULL, so the trail outlives the account it describes. See
+    docs/adr/0007.
+    """
+    await db.execute(delete(Budget).where(Budget.user_id == user.id))
+    await db.execute(delete(Category).where(Category.user_id == user.id))
     await db.delete(user)
     await db.commit()
     return True
 
 
-async def update_user_last_active(db: AsyncSession, user_id: uuid.UUID) -> User | None:
-    user = await db.get(User, user_id)
+async def update_user_last_active(
+    db: AsyncSession,
+    user: User,
+) -> User | None:
     if user is None:
         return None
     user.last_active = datetime.date.today()

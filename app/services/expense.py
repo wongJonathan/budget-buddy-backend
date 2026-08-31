@@ -2,11 +2,12 @@ import datetime
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import extract, select
+from sqlalchemy import extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.expense import Expense
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
+from app.services.visibility import live_expenses
 
 
 async def create_expense(db: AsyncSession, data: ExpenseCreate) -> Expense:
@@ -25,18 +26,21 @@ async def create_bulk_expenses(db: AsyncSession, data: list[ExpenseCreate]) -> N
 
 
 async def get_expense(db: AsyncSession, expense_id: uuid.UUID) -> Expense | None:
-    return await db.get(Expense, expense_id)
+    # Not db.get(): hidden by a deleted Budget counts as gone, and a soft-deleted
+    # Expense must 404 on direct id too.
+    result = await db.scalars(live_expenses().where(Expense.id == expense_id))
+    return result.one_or_none()
 
 
 async def list_expenses(db: AsyncSession) -> Sequence[Expense]:
-    result = await db.execute(select(Expense).where(~Expense.is_deactivated))
+    result = await db.execute(live_expenses())
     return result.scalars().all()
 
 
 async def update_expense(
     db: AsyncSession, expense_id: uuid.UUID, data: ExpenseUpdate
 ) -> Expense | None:
-    expense = await db.get(Expense, expense_id)
+    expense = await get_expense(db, expense_id)
     if expense is None:
         return None
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -47,10 +51,10 @@ async def update_expense(
 
 
 async def soft_delete_expense(db: AsyncSession, expense_id: uuid.UUID) -> bool:
-    expense = await db.get(Expense, expense_id)
+    expense = await get_expense(db, expense_id)
     if expense is None:
         return False
-    expense.is_deactivated = True
+    expense.is_deleted = True
     await db.commit()
     return True
 
@@ -58,15 +62,11 @@ async def soft_delete_expense(db: AsyncSession, expense_id: uuid.UUID) -> bool:
 async def list_budget_expenses(
     db: AsyncSession, budget_id: uuid.UUID, period: datetime.date, include_deleted: bool
 ) -> Sequence[Expense]:
-    conditions = [
+    query = live_expenses(include_deleted=include_deleted).where(
         Expense.budget_id == budget_id,
         extract("year", Expense.period) == period.year,
         extract("month", Expense.period) == period.month,
-    ]
-
-    if include_deleted is False:
-        conditions.append(~Expense.is_deactivated)
-
-    result = await db.execute(select(Expense).where(*conditions))
+    )
+    result = await db.execute(query)
 
     return result.scalars().all()

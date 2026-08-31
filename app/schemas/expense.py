@@ -47,4 +47,4 @@ class ExpenseRead(BaseModel):
     goal_amount: Decimal | None
     goal_date: date | None
     period: date
-    is_deactivated: bool
+    is_deleted: bool

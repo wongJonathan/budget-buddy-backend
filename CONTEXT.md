@@ -27,6 +27,10 @@ _Avoid_: "budget item" — Expense is the single row type covering all of these.
 An actual money movement recorded against a specific Expense. Always references an Expense (including Income transactions — income is not auto-generated, it's logged against the recurring "Income" Expense like any other transaction). One of five types: Spend, Spend Saved, Save, Transfer, Income. A Transfer is represented as two Transaction rows linked by `transfer_id`.
 _Avoid_: "description" — merged into `note`, there is no separate description field.
 
+**Soft delete**:
+Marking a Budget, Expense or Transaction as deleted (`is_deleted`) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses and their Transactions without touching them. Deleted means gone: a soft-deleted row is absent from lists and unreachable by id alike. Category and User are the exceptions — they hard-delete.
+_Avoid_: "deactivated" — Expense used to call its flag `is_deactivated`, which reads like a state a user chose rather than a deletion. One word for one concept.
+
 **Period**:
 The real DATE marking which month an Expense instance belongs to. Drives Rollover; not a display string like "MM/YYYY".
 
