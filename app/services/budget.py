@@ -11,6 +11,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.enums import Frequency
 from app.models.expense import Expense
+from app.models.user import User
 from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.category import CategoryCreate
 from app.schemas.expense import ExpenseCreate
@@ -19,18 +20,21 @@ from app.services.visibility import live_budgets
 _REQUIRED_EXPENSE_KEYS = {"tag", "name", "cost", "frequency", "amountSaved"}
 
 
-async def create_budget(db: AsyncSession, data: BudgetCreate) -> Budget:
+async def create_budget(db: AsyncSession, user: User, data: BudgetCreate) -> Budget:
     budget = Budget(**data.model_dump())
+    budget.user_id = user.id
     db.add(budget)
     await db.commit()
     await db.refresh(budget)
     return budget
 
 
-async def get_budget(db: AsyncSession, budget_id: uuid.UUID) -> Budget | None:
-    # Not db.get(): a soft-deleted Budget must be unreachable by direct id too, not
-    # merely absent from lists.
-    result = await db.scalars(live_budgets().where(Budget.id == budget_id))
+async def get_budget(
+    db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
+) -> Budget | None:
+    result = await db.scalars(
+        live_budgets().where(Budget.id == budget_id, Budget.user_id == user_id)
+    )
     return result.one_or_none()
 
 
@@ -44,12 +48,7 @@ async def list_budgets(
     return result.scalars().all()
 
 
-async def update_budget(
-    db: AsyncSession, budget_id: uuid.UUID, data: BudgetUpdate
-) -> Budget | None:
-    budget = await get_budget(db, budget_id)
-    if budget is None:
-        return None
+async def update_budget(db: AsyncSession, budget: Budget, data: BudgetUpdate) -> Budget:
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(budget, field, value)
     await db.commit()
@@ -57,15 +56,9 @@ async def update_budget(
     return budget
 
 
-async def soft_delete_budget(db: AsyncSession, budget_id: uuid.UUID) -> bool:
-    # Via get_budget, so deleting an already-deleted Budget is a 404 rather than a
-    # silent second success.
-    budget = await get_budget(db, budget_id)
-    if budget is None:
-        return False
+async def soft_delete_budget(db: AsyncSession, budget: Budget) -> None:
     budget.is_deleted = True
     await db.commit()
-    return True
 
 
 def _get_frequency(frequency: str) -> Frequency:
@@ -92,7 +85,9 @@ def _get_frequency(frequency: str) -> Frequency:
             raise ValueError(f"{frequency} is not recognized")
 
 
-async def convert_json_to_budget(db: AsyncSession, metadata: BudgetCreate, file: bytes) -> Budget:
+async def convert_json_to_budget(
+    db: AsyncSession, metadata: BudgetCreate, file: bytes, user: User
+) -> Budget:
     json_data = json.loads(file)
 
     expenses = []
@@ -116,7 +111,7 @@ async def convert_json_to_budget(db: AsyncSession, metadata: BudgetCreate, file:
     # Check for existing categories
     matching_categories = await db.execute(
         select(Category).where(
-            Category.user_id == metadata.user_id, Category.name.in_(category_names)
+            Category.user_id == user.id, Category.name.in_(category_names)
         )
     )
     for matching_category in matching_categories.scalars().all():
@@ -129,7 +124,7 @@ async def convert_json_to_budget(db: AsyncSession, metadata: BudgetCreate, file:
 
     for category_name in category_names:
         category_metadata = CategoryCreate(
-            user_id=metadata.user_id, name=category_name, system_type=None
+            user_id=user.id, name=category_name, system_type=None
         )
         category = Category(**category_metadata.model_dump())
         db.add(category)
