@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.user import User
+from app.ownership import verify_owned_refs
 from app.schemas.user import UserUpdate
 
 
@@ -27,6 +28,7 @@ async def list_users(db: AsyncSession) -> Sequence[User]:
 async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User | None:
     if user is None:
         return None
+    await verify_owned_refs(db, data, user)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     await db.commit()

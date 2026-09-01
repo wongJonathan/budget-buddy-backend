@@ -118,7 +118,7 @@ async def convert_json_to_budget(
         category_names.remove(matching_category.name)
         categories[matching_category.name] = matching_category.id
 
-    budget = Budget(**metadata.model_dump())
+    budget = Budget(**metadata.model_dump(), user_id=user.id)
     db.add(budget)
     await db.flush()
 
@@ -144,7 +144,7 @@ async def convert_json_to_budget(
             period=datetime.date.today(),
         )
 
-        expense = Expense(**expense_metadata.model_dump())
+        expense = Expense(**expense_metadata.model_dump(), user_id=user.id)
         db.add(expense)
 
     await db.commit()

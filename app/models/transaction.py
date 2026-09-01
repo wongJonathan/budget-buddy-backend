@@ -30,3 +30,6 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
         ForeignKey("transactions.id", ondelete="SET NULL"),
         default=None,
     )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )

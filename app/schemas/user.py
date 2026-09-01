@@ -3,12 +3,14 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
+from app.ownership import BudgetRef
 from app.schemas.budget import BudgetRead
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = None
-    active_budget_id: uuid.UUID | None = None
+    # A user may only point their active budget at one of their own.
+    active_budget_id: BudgetRef | None = None
 
 
 class UserRead(BaseModel):

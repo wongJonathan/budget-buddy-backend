@@ -39,3 +39,7 @@ The mechanism that instantiates next-period Expense rows from the prior period: 
 
 **Activation**:
 Making a Budget the User's current one (`User.active_budget_id`). Activation instantiates fresh Expense rows for the Budget rather than flipping a status flag, so a draft Budget and a live Budget stay fully independent copies. Provisioning is the one other thing that sets `active_budget_id`: the Budget it seeds is blank, so there are no Expense rows for Activation to instantiate. Everything after that goes through Activation.
+
+**Ownership**:
+The rule that a row and every parent it points at belong to the same User. Stamping `user_id` on a new row does not establish it - the `budget_id` or `expense_id` in the payload came from the client, so the parent is resolved through an owner-scoped lookup before the row is written. Declared on the schema field (`budget_id: BudgetRef`) rather than written out per service, so adding a foreign key is what causes it to be checked. A parent belonging to someone else is a 404, identical to one that does not exist. See `docs/adr/0008`.
+_Avoid_: "permissions", "access control" - there are no roles or grants here, only "is this row yours".

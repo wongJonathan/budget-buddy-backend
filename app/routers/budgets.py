@@ -51,29 +51,6 @@ async def get_budget(
     )
 
 
-@router.patch("/{budget_id}", response_model=BudgetRead)
-async def update_budget(
-    budget: OwnedBudget, data: BudgetUpdate, db: DbSession
-) -> Budget:
-
-    updated_budget = await budget_service.update_budget(db, budget, data)
-    if updated_budget is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
-    return updated_budget
-
-
-@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_budget(budget: OwnedBudget, db: DbSession) -> None:
-    deleted = await budget_service.soft_delete_budget(db, budget)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
-
-
-# I want to create an endpoint to upload json expense data and it creates the budget
 @router.post(
     "/json-convert-budget",
     response_model=BudgetRead,
@@ -93,3 +70,21 @@ async def json_convert_budget(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         ) from e
+
+
+@router.patch("/{budget_id}", response_model=BudgetRead)
+async def update_budget(
+    budget: OwnedBudget, data: BudgetUpdate, db: DbSession
+) -> Budget:
+
+    updated_budget = await budget_service.update_budget(db, budget, data)
+    if updated_budget is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
+        )
+    return updated_budget
+
+
+@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget(budget: OwnedBudget, db: DbSession) -> None:
+    await budget_service.soft_delete_budget(db, budget)

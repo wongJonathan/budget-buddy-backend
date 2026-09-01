@@ -21,8 +21,13 @@ def _expense_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
-async def test_create_expense(client: AsyncClient, mock_db: MagicMock) -> None:
-    response = await client.post("/expenses", json=_expense_payload())
+async def test_create_expense(authed_client: AsyncClient, mock_db: MagicMock) -> None:
+    # create_expense verifies budget_id and category_id belong to the caller, so
+    # the mocked lookup has to find something. The real check is covered against
+    # Postgres in test_ownership.py - a mock can only say "a row came back".
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+
+    response = await authed_client.post("/expenses", json=_expense_payload())
 
     assert response.status_code == 201
     body = response.json()
@@ -36,9 +41,11 @@ async def test_create_expense(client: AsyncClient, mock_db: MagicMock) -> None:
 
 
 async def test_create_expense_optional_fields_default(
-    client: AsyncClient, mock_db: MagicMock
+    authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
-    response = await client.post("/expenses", json=_expense_payload())
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+
+    response = await authed_client.post("/expenses", json=_expense_payload())
 
     assert response.status_code == 201
     body = response.json()
@@ -49,60 +56,62 @@ async def test_create_expense_optional_fields_default(
 
 
 async def test_list_expenses(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:
     expenses = [make_expense(name="Groceries"), make_expense(name="Rent")]
     mock_db.execute.return_value = make_scalars_result(expenses)
 
-    response = await client.get("/expenses")
+    response = await authed_client.get("/expenses")
 
     assert response.status_code == 200
     names = {e["name"] for e in response.json()}
     assert names == {"Groceries", "Rent"}
 
 
-async def test_get_expense_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_get_expense_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     expense = make_expense(name="Groceries")
     mock_db.scalars.return_value = make_scalars_one(expense)
 
-    response = await client.get(f"/expenses/{expense.id}")
+    response = await authed_client.get(f"/expenses/{expense.id}")
 
     assert response.status_code == 200
     assert response.json()["name"] == "Groceries"
 
 
-async def test_get_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_get_expense_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.get(f"/expenses/{uuid.uuid4()}")
+    response = await authed_client.get(f"/expenses/{uuid.uuid4()}")
 
     assert response.status_code == 404
 
 
-async def test_update_expense_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_update_expense_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     expense = make_expense(name="Groceries")
     mock_db.scalars.return_value = make_scalars_one(expense)
 
-    response = await client.patch(f"/expenses/{expense.id}", json={"name": "Food"})
+    response = await authed_client.patch(f"/expenses/{expense.id}", json={"name": "Food"})
 
     assert response.status_code == 200
     assert response.json()["name"] == "Food"
     mock_db.commit.assert_awaited_once()
 
 
-async def test_update_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_update_expense_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.patch(f"/expenses/{uuid.uuid4()}", json={"name": "Food"})
+    response = await authed_client.patch(f"/expenses/{uuid.uuid4()}", json={"name": "Food"})
 
     assert response.status_code == 404
 
 
-async def test_delete_expense_is_soft_delete(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_delete_expense_is_soft_delete(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
     expense = make_expense(is_deleted=False)
     mock_db.scalars.return_value = make_scalars_one(expense)
 
-    response = await client.delete(f"/expenses/{expense.id}")
+    response = await authed_client.delete(f"/expenses/{expense.id}")
 
     assert response.status_code == 204
     assert expense.is_deleted is True
@@ -110,9 +119,9 @@ async def test_delete_expense_is_soft_delete(client: AsyncClient, mock_db: Magic
     mock_db.commit.assert_awaited_once()
 
 
-async def test_delete_expense_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_delete_expense_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.delete(f"/expenses/{uuid.uuid4()}")
+    response = await authed_client.delete(f"/expenses/{uuid.uuid4()}")
 
     assert response.status_code == 404

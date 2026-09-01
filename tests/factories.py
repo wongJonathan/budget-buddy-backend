@@ -100,6 +100,7 @@ def make_expense(**overrides: Any) -> Expense:
         "goal_date": None,
         "period": datetime.date.today(),
         "is_deleted": False,
+        "user_id": uuid.uuid4(),
     }
     defaults.update(overrides)
     return Expense(**defaults)
@@ -115,6 +116,7 @@ def make_transaction(**overrides: Any) -> Transaction:
         "date": datetime.date.today(),
         "transfer_id": None,
         "is_deleted": False,
+        "user_id": uuid.uuid4(),
     }
     defaults.update(overrides)
     return Transaction(**defaults)

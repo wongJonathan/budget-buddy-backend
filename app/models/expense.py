@@ -63,3 +63,6 @@ class Expense(UUIDPrimaryKeyMixin, Base):
     goal_date: Mapped[date | None] = mapped_column(Date, default=None)
     period: Mapped[date] = mapped_column(Date)  # Meant for roll over calculation
     is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )

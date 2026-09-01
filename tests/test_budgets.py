@@ -7,66 +7,58 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.models.user import User
 from app.services import budget as budget_service
 from app.services.budget import _get_frequency
 from tests.factories import make_budget, make_category, make_expense, make_scalars_one
 
 # ---------------------------------------------------------------------------
-# Router: create / list / update / delete
+# Router: create / read / update / delete
+#
+# Every route here sits behind `CurrentUser`, so these use `authed_client`.
+# The 401 path is asserted separately, at the bottom, with the plain `client`.
 # ---------------------------------------------------------------------------
 
 
-async def test_create_budget(client: AsyncClient, mock_db: MagicMock) -> None:
-    user_id = uuid.uuid4()
-    response = await client.post(
-        "/budgets", json={"user_id": str(user_id), "name": "Groceries Budget"}
-    )
+async def test_create_budget(
+    authed_client: AsyncClient, mock_db: MagicMock, current_user: User
+) -> None:
+    response = await authed_client.post("/budgets", json={"name": "Groceries Budget"})
 
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "Groceries Budget"
     assert body["is_deleted"] is False
+    # Ownership comes from the session, not the payload - BudgetCreate has no user_id.
+    assert body["user_id"] == str(current_user.id)
     mock_db.add.assert_called_once()
     mock_db.commit.assert_awaited_once()
 
 
-async def test_list_budgets(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
-) -> None:
-    budgets = [make_budget(name="A"), make_budget(name="B")]
-    mock_db.execute.return_value = make_scalars_result(budgets)
-
-    response = await client.get("/budgets")
-
-    assert response.status_code == 200
-    names = {b["name"] for b in response.json()}
-    assert names == {"A", "B"}
-
-
-async def test_update_budget_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_update_budget_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget(name="Old name")
     mock_db.scalars.return_value = make_scalars_one(budget)
 
-    response = await client.patch(f"/budgets/{budget.id}", json={"name": "New name"})
+    response = await authed_client.patch(f"/budgets/{budget.id}", json={"name": "New name"})
 
     assert response.status_code == 200
     assert response.json()["name"] == "New name"
     mock_db.commit.assert_awaited_once()
 
 
-async def test_update_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_update_budget_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.patch(f"/budgets/{uuid.uuid4()}", json={"name": "New name"})
+    response = await authed_client.patch(f"/budgets/{uuid.uuid4()}", json={"name": "New name"})
 
     assert response.status_code == 404
 
 
-async def test_delete_budget_is_soft_delete(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_delete_budget_is_soft_delete(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     budget = make_budget(is_deleted=False)
     mock_db.scalars.return_value = make_scalars_one(budget)
 
-    response = await client.delete(f"/budgets/{budget.id}")
+    response = await authed_client.delete(f"/budgets/{budget.id}")
 
     assert response.status_code == 204
     assert budget.is_deleted is True
@@ -74,10 +66,10 @@ async def test_delete_budget_is_soft_delete(client: AsyncClient, mock_db: MagicM
     mock_db.commit.assert_awaited_once()
 
 
-async def test_delete_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_delete_budget_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.delete(f"/budgets/{uuid.uuid4()}")
+    response = await authed_client.delete(f"/budgets/{uuid.uuid4()}")
 
     assert response.status_code == 404
 
@@ -87,25 +79,27 @@ async def test_delete_budget_not_found(client: AsyncClient, mock_db: MagicMock) 
 # ---------------------------------------------------------------------------
 
 
-async def test_get_budget_not_found(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_get_budget_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 
-    response = await client.get(f"/budgets/{uuid.uuid4()}")
+    response = await authed_client.get(f"/budgets/{uuid.uuid4()}")
 
     assert response.status_code == 404
 
 
-async def test_get_budget_invalid_period_format(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_get_budget_invalid_period_format(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
     budget = make_budget()
     mock_db.scalars.return_value = make_scalars_one(budget)
 
-    response = await client.get(f"/budgets/{budget.id}?period=not-a-period")
+    response = await authed_client.get(f"/budgets/{budget.id}?period=not-a-period")
 
     assert response.status_code == 400
 
 
 async def test_get_budget_with_expenses(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:
     budget = make_budget(name="Groceries Budget")
     mock_db.scalars.return_value = make_scalars_one(budget)
@@ -113,7 +107,7 @@ async def test_get_budget_with_expenses(
         [make_expense(name="Milk"), make_expense(name="Bread")]
     )
 
-    response = await client.get(f"/budgets/{budget.id}")
+    response = await authed_client.get(f"/budgets/{budget.id}")
 
     assert response.status_code == 200
     body = response.json()
@@ -122,7 +116,7 @@ async def test_get_budget_with_expenses(
 
 
 async def test_get_budget_no_expenses_this_period_is_200_not_404(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:
     """A budget with nothing planned for the resolved period is a legitimate empty
     state, not a 404 — 404 stays reserved for 'budget doesn't exist'."""
@@ -130,20 +124,22 @@ async def test_get_budget_no_expenses_this_period_is_200_not_404(
     mock_db.scalars.return_value = make_scalars_one(budget)
     mock_db.execute.return_value = make_scalars_result([])
 
-    response = await client.get(f"/budgets/{budget.id}")
+    response = await authed_client.get(f"/budgets/{budget.id}")
 
     assert response.status_code == 200
     assert response.json()["expenses"] == []
 
 
-async def test_get_budget_default_period_is_today(client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_get_budget_default_period_is_today(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
     budget = make_budget()
     mock_db.scalars.return_value = make_scalars_one(budget)
 
     with patch(
         "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])
     ) as mock_list_expenses:
-        response = await client.get(f"/budgets/{budget.id}")
+        response = await authed_client.get(f"/budgets/{budget.id}")
 
     assert response.status_code == 200
     _, called_budget_id, called_period, called_include_deleted = mock_list_expenses.call_args.args
@@ -153,7 +149,7 @@ async def test_get_budget_default_period_is_today(client: AsyncClient, mock_db: 
 
 
 async def test_get_budget_explicit_period_and_include_deleted(
-    client: AsyncClient, mock_db: MagicMock
+    authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
     budget = make_budget()
     mock_db.scalars.return_value = make_scalars_one(budget)
@@ -161,7 +157,9 @@ async def test_get_budget_explicit_period_and_include_deleted(
     with patch(
         "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])
     ) as mock_list_expenses:
-        response = await client.get(f"/budgets/{budget.id}?period=2026-03&include_deleted=true")
+        response = await authed_client.get(
+            f"/budgets/{budget.id}?period=2026-03&include_deleted=true"
+        )
 
     assert response.status_code == 200
     _, _, called_period, called_include_deleted = mock_list_expenses.call_args.args
@@ -204,12 +202,12 @@ def _expenses_json(**entries: dict[str, object]) -> bytes:
 
 
 async def test_convert_json_to_budget_creates_budget_categories_expenses(
-    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock], current_user: User
 ) -> None:
     from app.schemas.budget import BudgetCreate
 
     mock_db.execute.return_value = make_scalars_result([])  # no existing categories
-    metadata = BudgetCreate(user_id=uuid.uuid4(), name="Imported Budget")
+    metadata = BudgetCreate(name="Imported Budget")
     file_bytes = _expenses_json(
         e1={
             "tag": "Groceries",
@@ -230,7 +228,9 @@ async def test_convert_json_to_budget_creates_budget_categories_expenses(
         skip_me={"transactionType": "expense", "amount": "10"},
     )
 
-    budget = await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes)
+    budget = await budget_service.convert_json_to_budget(
+        mock_db, metadata, file_bytes, current_user
+    )
 
     assert budget.name == "Imported Budget"
     # 1 budget + 2 categories + 2 expenses (the transactionType row is skipped)
@@ -239,14 +239,13 @@ async def test_convert_json_to_budget_creates_budget_categories_expenses(
 
 
 async def test_convert_json_to_budget_reuses_existing_category(
-    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock], current_user: User
 ) -> None:
     from app.schemas.budget import BudgetCreate
 
-    user_id = uuid.uuid4()
-    existing = make_category(user_id=user_id, name="Groceries")
+    existing = make_category(user_id=current_user.id, name="Groceries")
     mock_db.execute.return_value = make_scalars_result([existing])
-    metadata = BudgetCreate(user_id=user_id, name="Imported Budget")
+    metadata = BudgetCreate(name="Imported Budget")
     file_bytes = _expenses_json(
         e1={
             "tag": "Groceries",
@@ -258,30 +257,32 @@ async def test_convert_json_to_budget_reuses_existing_category(
         },
     )
 
-    await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes)
+    await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes, current_user)
 
     # 1 budget + 1 expense, no new category (Groceries already existed)
     assert mock_db.add.call_count == 2
 
 
-async def test_convert_json_to_budget_missing_required_key_raises(mock_db: MagicMock) -> None:
+async def test_convert_json_to_budget_missing_required_key_raises(
+    mock_db: MagicMock, current_user: User
+) -> None:
     from app.schemas.budget import BudgetCreate
 
-    metadata = BudgetCreate(user_id=uuid.uuid4(), name="Imported Budget")
+    metadata = BudgetCreate(name="Imported Budget")
     # missing cost/frequency/amountSaved
     file_bytes = _expenses_json(e1={"tag": "Groceries", "name": "Weekly shop"})
 
     with pytest.raises(ValueError, match="missing required field"):
-        await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes)
+        await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes, current_user)
 
     mock_db.commit.assert_not_awaited()
 
 
 async def test_json_convert_budget_endpoint(
-    client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
+    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
 ) -> None:
     mock_db.execute.return_value = make_scalars_result([])
-    meta = json.dumps({"user_id": str(uuid.uuid4()), "name": "Imported Budget"})
+    meta = json.dumps({"name": "Imported Budget"})
     file_bytes = _expenses_json(
         e1={
             "tag": "Groceries",
@@ -293,7 +294,7 @@ async def test_json_convert_budget_endpoint(
         },
     )
 
-    response = await client.post(
+    response = await authed_client.post(
         "/budgets/json-convert-budget",
         data={"meta": meta},
         files={"file": ("expenses.json", file_bytes, "application/json")},
@@ -304,12 +305,12 @@ async def test_json_convert_budget_endpoint(
 
 
 async def test_json_convert_budget_endpoint_missing_key_is_error(
-    client: AsyncClient, mock_db: MagicMock
+    authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
-    meta = json.dumps({"user_id": str(uuid.uuid4()), "name": "Imported Budget"})
+    meta = json.dumps({"name": "Imported Budget"})
     file_bytes = _expenses_json(e1={"tag": "Groceries", "name": "Weekly shop"})
 
-    response = await client.post(
+    response = await authed_client.post(
         "/budgets/json-convert-budget",
         data={"meta": meta},
         files={"file": ("expenses.json", file_bytes, "application/json")},
@@ -318,3 +319,35 @@ async def test_json_convert_budget_endpoint_missing_key_is_error(
     assert response.status_code == 400
     assert "missing required field" in response.json()["detail"]
     mock_db.commit.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Router: authentication
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/budgets"),
+        ("GET", "/budgets/{budget_id}"),
+        ("PATCH", "/budgets/{budget_id}"),
+        ("DELETE", "/budgets/{budget_id}"),
+        ("POST", "/budgets/json-convert-budget"),
+    ],
+)
+async def test_budget_routes_require_a_session(
+    client: AsyncClient, mock_db: MagicMock, method: str, path: str
+) -> None:
+    """No route on this router is reachable without a session.
+
+    `mock_db` is stubbed to return a budget, so a 401 here can only come from the
+    auth dependency - not from the row being missing.
+    """
+    mock_db.scalars.return_value = make_scalars_one(make_budget())
+
+    response = await client.request(
+        method, path.format(budget_id=uuid.uuid4()), json={"name": "Groceries Budget"}
+    )
+
+    assert response.status_code == 401

@@ -138,7 +138,7 @@ async def test_update_last_active_touches_the_current_user(
 ) -> None:
     current_user.last_active = datetime.date(2020, 1, 1)
 
-    response = await authed_client.patch(f"/users/{current_user.id}/last-active")
+    response = await authed_client.patch("/users/last-active")
 
     assert response.status_code == 200
     assert current_user.last_active == datetime.date.today()
@@ -146,6 +146,6 @@ async def test_update_last_active_touches_the_current_user(
 
 
 async def test_update_last_active_requires_a_session(client: AsyncClient) -> None:
-    response = await client.patch(f"/users/{uuid.uuid4()}/last-active")
+    response = await client.patch("/users/last-active")
 
     assert response.status_code == 401

@@ -54,6 +54,7 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
     expense = Expense(
         budget_id=budget.id,
         category_id=category.id,
+        user_id=user.id,
         name="Milk",
         cost=Decimal("10.00"),
         frequency=Frequency.MONTHLY,
@@ -64,6 +65,7 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
 
     transaction = Transaction(
         expense_id=expense.id,
+        user_id=user.id,
         type=TransactionType.SPEND,
         amount=Decimal("5.00"),
         date=datetime.date.today(),
@@ -81,11 +83,11 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
 
 async def test_a_seeded_chain_is_visible_to_start_with(db_session: AsyncSession) -> None:
     """The control: without it, every test below could pass by returning nothing."""
-    await seed_chain(db_session)
+    user, _, _, _ = await seed_chain(db_session)
 
     assert len(await budget_service.list_budgets(db_session)) == 1
-    assert len(await expense_service.list_expenses(db_session)) == 1
-    assert len(await transaction_service.list_transactions(db_session)) == 1
+    assert len(await expense_service.list_expenses(db_session, user)) == 1
+    assert len(await transaction_service.list_transactions(db_session, user)) == 1
 
 
 async def test_soft_deleting_a_budget_hides_its_expenses_and_transactions(
@@ -93,20 +95,20 @@ async def test_soft_deleting_a_budget_hides_its_expenses_and_transactions(
 ) -> None:
     """The whole point of deriving visibility: one flag, two levels below it, and no
     rows rewritten."""
-    _, budget, _, _ = await seed_chain(db_session)
+    user, budget, _, _ = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget.id)
+    await budget_service.soft_delete_budget(db_session, budget)
 
     assert await budget_service.list_budgets(db_session) == []
-    assert await expense_service.list_expenses(db_session) == []
-    assert await transaction_service.list_transactions(db_session) == []
+    assert await expense_service.list_expenses(db_session, user) == []
+    assert await transaction_service.list_transactions(db_session, user) == []
 
 
 async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None:
     """Hidden, not deleted - which is what makes restore possible later."""
     _, budget, _, _ = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget.id)
+    await budget_service.soft_delete_budget(db_session, budget)
 
     assert len((await db_session.scalars(select(Expense))).all()) == 1
     assert len((await db_session.scalars(select(Transaction))).all()) == 1
@@ -115,24 +117,24 @@ async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None
 async def test_soft_deleting_an_expense_hides_its_transactions(
     db_session: AsyncSession,
 ) -> None:
-    _, _, expense, _ = await seed_chain(db_session)
+    user, _, expense, _ = await seed_chain(db_session)
 
-    await expense_service.soft_delete_expense(db_session, expense.id)
+    await expense_service.soft_delete_expense(db_session, expense)
 
-    assert await expense_service.list_expenses(db_session) == []
-    assert await transaction_service.list_transactions(db_session) == []
+    assert await expense_service.list_expenses(db_session, user) == []
+    assert await transaction_service.list_transactions(db_session, user) == []
 
 
 async def test_soft_deleting_a_transaction_leaves_its_parents_alone(
     db_session: AsyncSession,
 ) -> None:
     """Visibility only ever flows downward."""
-    _, _, _, transaction = await seed_chain(db_session)
+    user, _, _, transaction = await seed_chain(db_session)
 
-    await transaction_service.soft_delete_transaction(db_session, transaction.id)
+    await transaction_service.soft_delete_transaction(db_session, transaction)
 
-    assert await transaction_service.list_transactions(db_session) == []
-    assert len(await expense_service.list_expenses(db_session)) == 1
+    assert await transaction_service.list_transactions(db_session, user) == []
+    assert len(await expense_service.list_expenses(db_session, user)) == 1
     assert len(await budget_service.list_budgets(db_session)) == 1
 
 
@@ -146,23 +148,26 @@ async def test_a_soft_deleted_expense_is_unreachable_by_id(
 ) -> None:
     """Otherwise "deleted" would only mean "hidden from browsing", and a stale link
     would still resolve."""
-    _, _, expense, _ = await seed_chain(db_session)
+    user, _, expense, _ = await seed_chain(db_session)
 
-    await expense_service.soft_delete_expense(db_session, expense.id)
+    await expense_service.soft_delete_expense(db_session, expense)
 
-    assert await expense_service.get_expense(db_session, expense.id) is None
+    assert await expense_service.get_expense(db_session, expense.id, user.id) is None
 
 
 async def test_an_expense_under_a_deleted_budget_is_unreachable_by_id(
     db_session: AsyncSession,
 ) -> None:
     """The Expense's own flag is untouched here - it's hidden purely by its ancestor."""
-    _, budget, expense, _ = await seed_chain(db_session)
+    user, budget, expense, transaction = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget.id)
+    await budget_service.soft_delete_budget(db_session, budget)
 
-    assert await expense_service.get_expense(db_session, expense.id) is None
-    assert await transaction_service.get_transaction(db_session, expense.id) is None
+    assert await expense_service.get_expense(db_session, expense.id, user.id) is None
+    assert (
+        await transaction_service.get_transaction(db_session, transaction.id, user.id)
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +180,7 @@ async def test_include_deleted_surfaces_deleted_expenses_of_a_live_budget(
 ) -> None:
     """Backs GET /budgets/{id}?include_deleted=true."""
     _, budget, expense, _ = await seed_chain(db_session)
-    await expense_service.soft_delete_expense(db_session, expense.id)
+    await expense_service.soft_delete_expense(db_session, expense)
 
     visible = await expense_service.list_budget_expenses(
         db_session, budget.id, datetime.date.today(), include_deleted=True
@@ -190,7 +195,7 @@ async def test_include_deleted_never_surfaces_children_of_a_deleted_budget(
     """include_deleted relaxes the row's own flag, never an ancestor's - a deleted
     parent is what "deleted" means for the child."""
     _, budget, _, _ = await seed_chain(db_session)
-    await budget_service.soft_delete_budget(db_session, budget.id)
+    await budget_service.soft_delete_budget(db_session, budget)
 
     visible = await expense_service.list_budget_expenses(
         db_session, budget.id, datetime.date.today(), include_deleted=True
@@ -235,3 +240,29 @@ async def test_deleting_an_account_keeps_the_audit_trail_intact(
     assert event.user_id is None
     assert event.email == user.email
     assert event.event_type == "login_success"
+
+
+# ---------------------------------------------------------------------------
+# ownership scoping
+# ---------------------------------------------------------------------------
+
+
+async def test_a_budget_is_invisible_to_a_different_user(db_session: AsyncSession) -> None:
+    """The property `OwnedBudget` relies on, asserted against a real query.
+
+    The router tests can't prove this: `mock_db.scalars` hands back whatever budget
+    they stub regardless of the `user_id` filter in the select. Only a real database
+    can show that the filter is what makes the row disappear.
+    """
+    owner, budget, _, _ = await seed_chain(db_session)
+    stranger = User(
+        display_name="Bob",
+        email=f"bob-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="x",
+    )
+    db_session.add(stranger)
+    await db_session.commit()
+
+    assert await budget_service.get_budget(db_session, budget.id, owner.id) is not None
+    # Someone else's budget is a 404, not a 403 - its existence never leaks.
+    assert await budget_service.get_budget(db_session, budget.id, stranger.id) is None
