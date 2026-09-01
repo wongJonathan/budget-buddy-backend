@@ -1,6 +1,4 @@
-from collections.abc import Sequence
-
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.dependencies import CurrentUser, DbSession, OwnedCategories
 from app.models.category import Category
@@ -17,11 +15,6 @@ async def create_category(
     return await category_service.create_category(db, data, user)
 
 
-@router.get("", response_model=list[CategoryRead])
-async def list_categories(db: DbSession) -> Sequence[Category]:
-    return await category_service.list_categories(db)
-
-
 @router.get("/{category_id}", response_model=CategoryRead)
 async def get_category(category: OwnedCategories, db: DbSession) -> Category:
     return category
@@ -31,18 +24,9 @@ async def get_category(category: OwnedCategories, db: DbSession) -> Category:
 async def update_category(
     category: OwnedCategories, data: CategoryUpdate, db: DbSession
 ) -> Category:
-    updated_category = await category_service.update_category(db, category, data)
-    if updated_category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
-    return updated_category
+    return await category_service.update_category(db, category, data)
 
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_category(category: OwnedCategories, db: DbSession) -> None:
-    deleted = await category_service.delete_category(db, category)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
+    await category_service.delete_category(db, category)

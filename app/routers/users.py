@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.dependencies import CurrentUser, DbSession
 from app.models.user import User
@@ -24,29 +24,14 @@ async def get_user(user: CurrentUser, db: DbSession) -> UserWithBudgetsRead:
 
 @router.patch("", response_model=UserRead)
 async def update_user(user: CurrentUser, data: UserUpdate, db: DbSession) -> User:
-    updated_user = await user_service.update_user(db, user, data)
-
-    if updated_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    return updated_user
+    return await user_service.update_user(db, user, data)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user: CurrentUser, db: DbSession) -> None:
-    deleted = await user_service.delete_user(db, user)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+    await user_service.delete_user(db, user)
 
 
 @router.patch("/last-active", response_model=UserRead)
 async def update_last_active(user: CurrentUser, db: DbSession) -> User:
-    last_active_user = await user_service.update_user_last_active(db, user)
-    if last_active_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    return last_active_user
+    return await user_service.update_user_last_active(db, user)

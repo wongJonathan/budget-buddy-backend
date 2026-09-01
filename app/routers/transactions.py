@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.dependencies import CurrentUser, DbSession, OwnedTransaction
 from app.models.transaction import Transaction
@@ -35,10 +35,7 @@ async def get_transaction(transaction: OwnedTransaction) -> Transaction:
 async def update_transaction(
     transaction: OwnedTransaction, data: TransactionUpdate, user: CurrentUser, db: DbSession
 ) -> Transaction:
-    updated_transaction = await transaction_service.update_transaction(db, transaction, data, user)
-    if updated_transaction is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
-    return updated_transaction
+    return await transaction_service.update_transaction(db, transaction, data, user)
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)

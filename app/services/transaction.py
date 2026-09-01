@@ -47,7 +47,6 @@ async def update_transaction(
     return transaction
 
 
-async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) -> bool:
+async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) -> None:
     transaction.is_deleted = True
     await db.commit()
-    return True

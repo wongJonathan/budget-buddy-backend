@@ -76,13 +76,7 @@ async def json_convert_budget(
 async def update_budget(
     budget: OwnedBudget, data: BudgetUpdate, db: DbSession
 ) -> Budget:
-
-    updated_budget = await budget_service.update_budget(db, budget, data)
-    if updated_budget is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found"
-        )
-    return updated_budget
+    return await budget_service.update_budget(db, budget, data)
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)

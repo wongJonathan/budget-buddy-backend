@@ -53,10 +53,9 @@ async def update_expense(db: AsyncSession, expense: Expense, data: ExpenseUpdate
     return expense
 
 
-async def soft_delete_expense(db: AsyncSession, expense: Expense) -> bool:
+async def soft_delete_expense(db: AsyncSession, expense: Expense) -> None:
     expense.is_deleted = True
     await db.commit()
-    return True
 
 
 async def list_budget_expenses(

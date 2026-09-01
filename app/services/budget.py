@@ -39,9 +39,9 @@ async def get_budget(
 
 
 async def list_budgets(
-    db: AsyncSession, user_id: uuid.UUID | None = None, hide_deleted: bool = True
+    db: AsyncSession, user_id: uuid.UUID | None = None
 ) -> Sequence[Budget]:
-    query = live_budgets(include_deleted=not hide_deleted)
+    query = live_budgets()
     if user_id is not None:
         query = query.where(Budget.user_id == user_id)
     result = await db.execute(query)
@@ -123,10 +123,8 @@ async def convert_json_to_budget(
     await db.flush()
 
     for category_name in category_names:
-        category_metadata = CategoryCreate(
-            user_id=user.id, name=category_name, system_type=None
-        )
-        category = Category(**category_metadata.model_dump())
+        category_metadata = CategoryCreate(name=category_name, system_type=None)
+        category = Category(**category_metadata.model_dump(), user_id=user.id)
         db.add(category)
         await db.flush()
         categories[category_name] = category.id

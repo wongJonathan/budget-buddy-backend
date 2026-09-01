@@ -1,5 +1,4 @@
 import datetime
-from collections.abc import Sequence
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,14 +19,7 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     return result.one_or_none()
 
 
-async def list_users(db: AsyncSession) -> Sequence[User]:
-    result = await db.execute(select(User))
-    return result.scalars().all()
-
-
-async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User | None:
-    if user is None:
-        return None
+async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User:
     await verify_owned_refs(db, data, user)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
@@ -39,7 +31,7 @@ async def update_user(db: AsyncSession, user: User, data: UserUpdate) -> User | 
 async def delete_user(
     db: AsyncSession,
     user: User,
-) -> bool:
+) -> None:
     """Erase an account and everything it owns.
 
     The teardown order is forced by `expenses.category_id`, which is ON DELETE
@@ -57,15 +49,12 @@ async def delete_user(
     await db.execute(delete(Category).where(Category.user_id == user.id))
     await db.delete(user)
     await db.commit()
-    return True
 
 
 async def update_user_last_active(
     db: AsyncSession,
     user: User,
-) -> User | None:
-    if user is None:
-        return None
+) -> User:
     user.last_active = datetime.date.today()
     await db.commit()
     await db.refresh(user)

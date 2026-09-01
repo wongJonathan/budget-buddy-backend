@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.dependencies import CurrentUser, DbSession, OwnedExpense
 from app.models.expense import Expense
@@ -38,18 +38,9 @@ async def get_expense(expense: OwnedExpense) -> Expense:
 async def update_expense(
     expense: OwnedExpense, data: ExpenseUpdate, db: DbSession
 ) -> Expense:
-    updated_expense = await expense_service.update_expense(db, expense, data)
-    if updated_expense is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found"
-        )
-    return updated_expense
+    return await expense_service.update_expense(db, expense, data)
 
 
 @router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_expense(expense: OwnedExpense, db: DbSession) -> None:
-    deleted = await expense_service.soft_delete_expense(db, expense)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found"
-        )
+    await expense_service.soft_delete_expense(db, expense)
