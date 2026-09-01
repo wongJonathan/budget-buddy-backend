@@ -97,14 +97,16 @@ _OWNABLE: dict[type[Any], _Ownable] = {
 }
 
 
-async def require_owned[T](db: AsyncSession, model: type[T], obj_id: uuid.UUID, user: User) -> T:
+async def require_owned[T](
+    db: AsyncSession, model: type[T], obj_id: uuid.UUID, user: User
+) -> T:
     """Return the caller's row of `model`, or raise `NotOwned`.
 
     The single lookup behind both ownership checks: the path-parameter
     dependencies in `dependencies.py` and the payload walk below.
     """
     ownable = _OWNABLE[model]
-    query = ownable.live().where(ownable.id_column == obj_id, ownable.owner_column == user.id)
+    query = ownable.live().where(ownable.id_column == obj_id, ownable.owner_column == user.id)  # type: ignore
     row = (await db.scalars(query)).one_or_none()
     if row is None:
         raise NotOwned(model)

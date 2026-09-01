@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db_session
 from app.models.budget import Budget
+from app.models.category import Category
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 from app.models.user import User
@@ -51,7 +52,9 @@ def owned_path[T](model: type[T], param_name: str) -> Callable[..., Awaitable[T]
 
     dependency.__signature__ = Signature(  # type: ignore[attr-defined]
         [
-            Parameter(param_name, Parameter.POSITIONAL_OR_KEYWORD, annotation=uuid.UUID),
+            Parameter(
+                param_name, Parameter.POSITIONAL_OR_KEYWORD, annotation=uuid.UUID
+            ),
             Parameter("user", Parameter.POSITIONAL_OR_KEYWORD, annotation=CurrentUser),
             Parameter("db", Parameter.POSITIONAL_OR_KEYWORD, annotation=DbSession),
         ]
@@ -61,4 +64,7 @@ def owned_path[T](model: type[T], param_name: str) -> Callable[..., Awaitable[T]
 
 OwnedBudget = Annotated[Budget, Depends(owned_path(Budget, "budget_id"))]
 OwnedExpense = Annotated[Expense, Depends(owned_path(Expense, "expense_id"))]
-OwnedTransaction = Annotated[Transaction, Depends(owned_path(Transaction, "transaction_id"))]
+OwnedTransaction = Annotated[
+    Transaction, Depends(owned_path(Transaction, "transaction_id"))
+]
+OwnedCategories = Annotated[Category, Depends(owned_path(Category, "category_id"))]
