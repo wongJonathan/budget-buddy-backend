@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
+from app.schemas.fields import current_period
 from tests.factories import make_expense, make_scalars_one
 
 
@@ -15,7 +16,9 @@ def _expense_payload(**overrides: object) -> dict[str, object]:
         "name": "Groceries",
         "cost": "100.00",
         "frequency": "monthly",
-        "period": "2026-08-01",
+        # Computed, not literal: only the open month is accepted, so a hard-coded
+        # date would turn this whole file red on the 1st of some future month.
+        "period": current_period().isoformat(),
     }
     payload.update(overrides)
     return payload
@@ -125,3 +128,60 @@ async def test_delete_expense_not_found(authed_client: AsyncClient, mock_db: Mag
     response = await authed_client.delete(f"/expenses/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+async def test_a_mid_month_period_is_stored_as_the_first(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """Anywhere inside the open month is accepted, and canonicalized on the way in."""
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+    mid_month = current_period().replace(day=17)
+
+    response = await authed_client.post(
+        "/expenses", json=_expense_payload(period=mid_month.isoformat())
+    )
+
+    assert response.status_code == 201
+    assert response.json()["period"] == current_period().isoformat()
+
+
+async def test_a_future_period_is_rejected(authed_client: AsyncClient, mock_db: MagicMock) -> None:
+    """Planning ahead is what draft Budgets are for - see docs/adr/0010."""
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+    period = current_period()
+    ahead = period.replace(year=period.year + 1)
+
+    response = await authed_client.post(
+        "/expenses", json=_expense_payload(period=ahead.isoformat())
+    )
+
+    assert response.status_code == 422
+
+
+async def test_a_past_period_is_rejected(authed_client: AsyncClient, mock_db: MagicMock) -> None:
+    """Backdating would change a shortfall Rollover has already acted on."""
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+    period = current_period()
+    behind = period.replace(year=period.year - 1)
+
+    response = await authed_client.post(
+        "/expenses", json=_expense_payload(period=behind.isoformat())
+    )
+
+    assert response.status_code == 422
+
+
+async def test_patching_an_expense_into_another_period_is_rejected(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """Otherwise the create-time restriction is one PATCH away from meaningless."""
+    expense = make_expense()
+    mock_db.scalars.return_value = make_scalars_one(expense)
+    period = current_period()
+    behind = period.replace(year=period.year - 1)
+
+    response = await authed_client.patch(
+        f"/expenses/{expense.id}", json={"period": behind.isoformat()}
+    )
+
+    assert response.status_code == 422

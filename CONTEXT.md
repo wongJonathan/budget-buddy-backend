@@ -16,26 +16,34 @@ A named collection of Expenses belonging to a User, rolled forward period by per
 _Avoid_: "active budget" as a Budget-side flag/status — activeness is always read from the User side.
 
 **Category**:
-A user-owned label applied to Expenses. Most Categories are freely named by the user, but `system_type` marks a reserved subset (`income`, `saving_goal`, `debt`) that business logic (rollover, income/expense linking, budget-total filtering) keys off of instead of the user-editable name.
-_Avoid_: treating `system_type` as just another user-facing "type" field — it's a reserved business-logic hook, distinct from arbitrary category naming.
+A user-owned label applied to Expenses, and nothing more — no reserved subset, no business-logic role, no control over how the Expenses under it behave. See `docs/adr/0009`.
+_Avoid_: "system category", "income category", "debt category" — these existed as a `system_type` hook and were removed. Sign and lineage are facts about a row, never about its label.
 
 **Expense**:
-A line item within a Budget, instantiated once per Period. Covers planned spending, savings goals, debt paydown, and — via a Category with `system_type = income` — recurring income, all through the same shape. There is no separate SavingFund, BudgetItem, or Income table.
+A line item within a Budget, instantiated once per Period, covering planned spending, savings goals and debt paydown through one shape. Income is not an Expense — it has no plan to be measured against (`docs/adr/0009`). There is no separate SavingFund or BudgetItem table.
 _Avoid_: "budget item" — Expense is the single row type covering all of these.
 
 **Transaction**:
-An actual money movement recorded against a specific Expense. Always references an Expense (including Income transactions — income is not auto-generated, it's logged against the recurring "Income" Expense like any other transaction). One of five types: Spend, Spend Saved, Save, Transfer, Income. A Transfer is represented as two Transaction rows linked by `transfer_id`.
-_Avoid_: "description" — merged into `note`, there is no separate description field.
+Any change to the money available to a User: money in, money out, or money moved between Expenses. It references the Expense it moved money against, or no Expense at all when it is Income. Always named. One of five types: Spend, Spend Saved, Save, Transfer, Income. A Transfer is represented as two Transaction rows linked by `transfer_id`.
+_Avoid_: "description" — merged into `note`, there is no separate description field. Also avoid reading Transaction as "an actual measured against a plan" — that holds only for the subset that references an Expense.
+
+**Income**:
+Money arriving, recorded as a Transaction with no Expense. Always observed after the fact, never planned — nothing anywhere holds an expected inflow figure. Belongs to the User rather than to a Budget: two Budgets are two competing plans against the same real money.
+_Avoid_: "income category", "income expense" — income was once modeled as a recurring Expense and is not (`docs/adr/0009`).
 
 **Soft delete**:
 Marking a Budget, Expense or Transaction as deleted (`is_deleted`) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses and their Transactions without touching them. Deleted means gone: a soft-deleted row is absent from lists and unreachable by id alike. Category and User are the exceptions — they hard-delete.
 _Avoid_: "deactivated" — Expense used to call its flag `is_deactivated`, which reads like a state a user chose rather than a deletion. One word for one concept.
 
 **Period**:
-The real DATE marking which month an Expense instance belongs to. Drives Rollover; not a display string like "MM/YYYY".
+The real DATE marking which month an Expense instance belongs to, always the first day of that month. Drives Rollover; not a display string like "MM/YYYY". Expenses can only be created in the current Period — neither ahead nor behind.
+
+**Met**:
+An Expense whose Transactions for its Period total at least its `monthly_cost`. Measured against `monthly_cost` for every frequency: `cost` is the figure the user typed, `monthly_cost` is what a Period is measured against.
 
 **Rollover**:
-The mechanism that instantiates next-period Expense rows from the prior period: exact match on the target Period reuses existing rows, otherwise it walks forward month-by-month from the latest existing Period for that Budget. Handles first-activation and multi-month gaps the same way.
+The scheduled job that instantiates the next Period's Expense rows from the prior one and carries unmet Expenses forward, walking month-by-month so multi-month gaps are handled like any other step. A carried Expense is an ordinary Expense with `frequency = once`, indistinguishable from one the user created; being `once` is what stops it carrying again once Met. Idempotent by recording which Periods it has processed, never by inspecting whether the target Period looks empty. See `docs/adr/0010`.
+_Avoid_: "debt expense" as a distinct kind of row — there is no such kind.
 
 **Activation**:
 Making a Budget the User's current one (`User.active_budget_id`). Activation instantiates fresh Expense rows for the Budget rather than flipping a status flag, so a draft Budget and a live Budget stay fully independent copies. Provisioning is the one other thing that sets `active_budget_id`: the Budget it seeds is blank, so there are no Expense rows for Activation to instantiate. Everything after that goes through Activation.

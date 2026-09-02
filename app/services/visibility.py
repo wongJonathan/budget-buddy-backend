@@ -15,9 +15,14 @@ for the deleted Expenses of a live Budget is a real feature (it backs
 Budget is not, because the parent being gone is what "deleted" means for the child.
 
 Category takes no part in this: it hard-deletes, guarded by ON DELETE RESTRICT.
+
+An income Transaction has no Expense at all (docs/adr/0009), so `live_transactions`
+outer-joins rather than joins, and spells out that a null `expense_id` is visible on
+its own account. An inner join here would drop every income row from every list -
+without an error, and without any query in the codebase looking wrong.
 """
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, and_, or_, select
 
 from app.models.budget import Budget
 from app.models.expense import Expense
@@ -46,12 +51,23 @@ def live_expenses(*, include_deleted: bool = False) -> Select[tuple[Expense]]:
 
 
 def live_transactions(*, include_deleted: bool = False) -> Select[tuple[Transaction]]:
-    """Transactions whose whole chain up to the Budget is intact."""
+    """Transactions whose whole chain up to the Budget is intact.
+
+    Income has no chain, so it is visible whenever it is not itself deleted. Note the
+    null check cannot be folded into the join condition: with an outer join, a missing
+    Expense leaves `Expense.is_deleted` NULL, and `~NULL` is NULL, which filters the
+    row out exactly as an inner join would have.
+    """
     query = (
         select(Transaction)
-        .join(Expense, Expense.id == Transaction.expense_id)
-        .join(Budget, Budget.id == Expense.budget_id)
-        .where(~Expense.is_deleted, ~Budget.is_deleted)
+        .outerjoin(Expense, Expense.id == Transaction.expense_id)
+        .outerjoin(Budget, Budget.id == Expense.budget_id)
+        .where(
+            or_(
+                Transaction.expense_id.is_(None),
+                and_(~Expense.is_deleted, ~Budget.is_deleted),
+            )
+        )
     )
     if not include_deleted:
         query = query.where(~Transaction.is_deleted)

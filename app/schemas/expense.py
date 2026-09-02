@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import Frequency
 from app.ownership import BudgetRef, CategoryRef
+from app.schemas.fields import CurrentPeriod
 
 
 class ExpenseCreate(BaseModel):
@@ -18,7 +19,7 @@ class ExpenseCreate(BaseModel):
     amount_saved: Decimal = Decimal(0)
     goal_amount: Decimal | None = None
     goal_date: date | None = None
-    period: date
+    period: CurrentPeriod
 
 
 class ExpenseUpdate(BaseModel):
@@ -29,7 +30,7 @@ class ExpenseUpdate(BaseModel):
     amount_saved: Decimal | None = None
     goal_amount: Decimal | None = None
     goal_date: date | None = None
-    period: date | None = None
+    period: CurrentPeriod | None = None
 
 
 class ExpenseRead(BaseModel):

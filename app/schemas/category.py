@@ -2,17 +2,13 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import CategorySystemType
-
 
 class CategoryCreate(BaseModel):
     name: str
-    system_type: CategorySystemType | None = None
 
 
 class CategoryUpdate(BaseModel):
     name: str | None = None
-    system_type: CategorySystemType | None = None
 
 
 class CategoryRead(BaseModel):
@@ -21,4 +17,3 @@ class CategoryRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     name: str
-    system_type: CategorySystemType | None

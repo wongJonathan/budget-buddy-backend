@@ -21,6 +21,7 @@ from app.models.enums import Frequency, TransactionType
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.schemas.fields import current_period
 from app.services import budget as budget_service
 from app.services import expense as expense_service
 from app.services import transaction as transaction_service
@@ -58,7 +59,7 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
         name="Milk",
         cost=Decimal("10.00"),
         frequency=Frequency.MONTHLY,
-        period=datetime.date.today(),
+        period=current_period(),
     )
     db.add(expense)
     await db.flush()
@@ -67,6 +68,7 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
         expense_id=expense.id,
         user_id=user.id,
         type=TransactionType.SPEND,
+        name="Milk run",
         amount=Decimal("5.00"),
         date=datetime.date.today(),
     )
@@ -164,10 +166,7 @@ async def test_an_expense_under_a_deleted_budget_is_unreachable_by_id(
     await budget_service.soft_delete_budget(db_session, budget)
 
     assert await expense_service.get_expense(db_session, expense.id, user.id) is None
-    assert (
-        await transaction_service.get_transaction(db_session, transaction.id, user.id)
-        is None
-    )
+    assert await transaction_service.get_transaction(db_session, transaction.id, user.id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +228,7 @@ async def test_deleting_an_account_keeps_the_audit_trail_intact(
     account, email included, so a compromised account can't erase the evidence by
     deleting itself. Only user_id is nulled."""
     user, _, _, _ = await seed_chain(db_session)
-    db_session.add(
-        AuthEvents(event_type="login_success", user_id=user.id, email=user.email)
-    )
+    db_session.add(AuthEvents(event_type="login_success", user_id=user.id, email=user.email))
     await db_session.commit()
 
     await user_service.delete_user(db_session, user)
@@ -266,3 +263,78 @@ async def test_a_budget_is_invisible_to_a_different_user(db_session: AsyncSessio
     assert await budget_service.get_budget(db_session, budget.id, owner.id) is not None
     # Someone else's budget is a 404, not a 403 - its existence never leaks.
     assert await budget_service.get_budget(db_session, budget.id, stranger.id) is None
+
+
+# ---------------------------------------------------------------------------
+# income: a Transaction with no Expense at all
+# ---------------------------------------------------------------------------
+# `live_transactions` outer-joins Expense so these rows survive. An inner join
+# would drop every one of them from every list without erroring anywhere, which
+# is why they get their own tests rather than riding along on the chain above.
+# See docs/adr/0009.
+
+
+async def _income(db: AsyncSession, user: User, amount: str = "3000.00") -> Transaction:
+    income = Transaction(
+        expense_id=None,
+        user_id=user.id,
+        type=TransactionType.INCOME,
+        name="Salary",
+        amount=Decimal(amount),
+        date=current_period(),
+    )
+    db.add(income)
+    await db.commit()
+    return income
+
+
+async def test_income_with_no_expense_is_visible(db_session: AsyncSession) -> None:
+    user, _, _, spend = await seed_chain(db_session)
+    income = await _income(db_session, user)
+
+    visible = await transaction_service.list_transactions(db_session, user)
+
+    assert {t.id for t in visible} == {spend.id, income.id}
+
+
+async def test_income_survives_deleting_the_budget(db_session: AsyncSession) -> None:
+    """It has no Budget to be hidden by - that is the point of the null."""
+    user, budget, _, _ = await seed_chain(db_session)
+    income = await _income(db_session, user)
+
+    await budget_service.soft_delete_budget(db_session, budget)
+    visible = await transaction_service.list_transactions(db_session, user)
+
+    assert [t.id for t in visible] == [income.id]
+
+
+async def test_income_is_hidden_once_it_is_itself_deleted(db_session: AsyncSession) -> None:
+    """Its own flag is the only thing that can hide it."""
+    user, _, _, _ = await seed_chain(db_session)
+    income = await _income(db_session, user)
+
+    await transaction_service.soft_delete_transaction(db_session, income)
+    visible = await transaction_service.list_transactions(db_session, user)
+
+    assert income.id not in {t.id for t in visible}
+
+
+async def test_income_is_unreachable_by_id_once_deleted(db_session: AsyncSession) -> None:
+    user, _, _, _ = await seed_chain(db_session)
+    income = await _income(db_session, user)
+    await transaction_service.soft_delete_transaction(db_session, income)
+
+    found = await transaction_service.get_transaction(db_session, income.id, user.id)
+
+    assert found is None
+
+
+async def test_income_belongs_to_its_owner_only(db_session: AsyncSession) -> None:
+    alice, _, _, _ = await seed_chain(db_session)
+    await _income(db_session, alice)
+    bob, _, _, _ = await seed_chain(db_session)
+
+    assert await transaction_service.list_transactions(db_session, bob) != []
+    assert all(
+        t.user_id == bob.id for t in await transaction_service.list_transactions(db_session, bob)
+    )

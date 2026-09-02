@@ -31,20 +31,24 @@ async def test_create_category(
     assert body["name"] == "Groceries"
     # Ownership comes from the session - CategoryCreate has no user_id to forge.
     assert body["user_id"] == str(current_user.id)
-    assert body["system_type"] is None
     mock_db.add.assert_called_once()
     mock_db.commit.assert_awaited_once()
 
 
-async def test_create_category_with_system_type(
-    authed_client: AsyncClient, mock_db: MagicMock
+async def test_a_system_type_in_the_payload_cannot_reintroduce_reserved_behaviour(
+    authed_client: AsyncClient,
 ) -> None:
+    """`system_type` is gone from the schema and the table (docs/adr/0009).
+
+    A client still sending the old field gets a plain Category, not a reserved one -
+    the extra key is dropped, and nothing in the response carries it back.
+    """
     response = await authed_client.post(
         "/categories", json={"name": "Income", "system_type": "income"}
     )
 
     assert response.status_code == 201
-    assert response.json()["system_type"] == "income"
+    assert "system_type" not in response.json()
 
 
 async def test_create_category_ignores_a_user_id_in_the_payload(

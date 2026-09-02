@@ -12,6 +12,7 @@ def _transaction_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "expense_id": str(uuid.uuid4()),
         "type": "spend",
+        "name": "Weekly shop",
         "amount": "42.50",
         "date": "2026-08-01",
     }
@@ -120,3 +121,45 @@ async def test_delete_transaction_not_found(authed_client: AsyncClient, mock_db:
     response = await authed_client.delete(f"/transactions/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+async def test_create_income_without_an_expense(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """Income is a Transaction with no Expense - docs/adr/0009.
+
+    Nothing is looked up, because there is no parent id to own: `verify_owned_refs`
+    skips a null reference rather than treating it as a miss.
+    """
+    payload = _transaction_payload(type="income", name="Salary")
+    payload.pop("expense_id")
+
+    response = await authed_client.post("/transactions", json=payload)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["expense_id"] is None
+    assert body["name"] == "Salary"
+    mock_db.commit.assert_awaited_once()
+
+
+async def test_an_explicit_null_expense_id_is_accepted(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """Sending null is the same as omitting it - neither is a lookup for "not found"."""
+    response = await authed_client.post(
+        "/transactions", json=_transaction_payload(type="income", expense_id=None)
+    )
+
+    assert response.status_code == 201
+    assert response.json()["expense_id"] is None
+
+
+async def test_a_transaction_without_a_name_is_rejected(authed_client: AsyncClient) -> None:
+    """Required for every type, not only income: a row must always be identifiable."""
+    payload = _transaction_payload()
+    payload.pop("name")
+
+    response = await authed_client.post("/transactions", json=payload)
+
+    assert response.status_code == 422

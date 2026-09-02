@@ -11,14 +11,20 @@ from app.models.enums import TransactionType, pg_enum
 
 
 class Transaction(UUIDPrimaryKeyMixin, Base):
+    """Any change to the money available to a User - in, out, or between Expenses."""
+
     __tablename__ = "transactions"
 
-    expense_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("expenses.id", ondelete="CASCADE")
+    # Null expense_id indicates that it's income
+    expense_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("expenses.id", ondelete="CASCADE"),
+        default=None,
     )
     type: Mapped[TransactionType] = mapped_column(
         pg_enum(TransactionType, "transaction_type")
     )
+    name: Mapped[str] = mapped_column()
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
     # `datetime` module (not `from datetime import date`) avoids this field's own

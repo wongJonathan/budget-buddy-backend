@@ -20,12 +20,6 @@ class Frequency(enum.StrEnum):
     ONCE = "once"
 
 
-class CategorySystemType(enum.StrEnum):
-    INCOME = "income"
-    SAVING_GOAL = "saving_goal"
-    DEBT = "debt"
-
-
 class TransactionType(enum.StrEnum):
     SPEND = "spend"
     SPEND_SAVED = "spend_saved"

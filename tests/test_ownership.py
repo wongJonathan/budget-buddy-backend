@@ -30,6 +30,7 @@ from app.models.enums import Frequency, TransactionType
 from app.models.user import User
 from app.ownership import NotOwned, _owned_marker
 from app.schemas.expense import ExpenseCreate
+from app.schemas.fields import current_period
 from app.schemas.transaction import TransactionCreate
 from app.schemas.user import UserUpdate
 from app.services import expense as expense_service
@@ -119,7 +120,7 @@ def _expense_payload(budget: Budget, category: Category) -> ExpenseCreate:
         name="Milk",
         cost=Decimal("10.00"),
         frequency=Frequency.MONTHLY,
-        period=datetime.date.today(),
+        period=current_period(),
     )
 
 
@@ -203,6 +204,7 @@ async def test_a_transaction_cannot_be_attached_to_another_users_expense(
             TransactionCreate(
                 expense_id=bobs_expense.id,
                 type=TransactionType.SPEND,
+                name="Bob shop",
                 amount=Decimal("5.00"),
                 date=datetime.date.today(),
             ),
@@ -227,6 +229,7 @@ async def test_a_transfer_cannot_point_at_another_users_transaction(
         TransactionCreate(
             expense_id=bobs_expense.id,
             type=TransactionType.SPEND,
+            name="Bob shop",
             amount=Decimal("5.00"),
             date=datetime.date.today(),
         ),
@@ -239,6 +242,7 @@ async def test_a_transfer_cannot_point_at_another_users_transaction(
             TransactionCreate(
                 expense_id=alices_expense.id,
                 type=TransactionType.TRANSFER,
+                name="Alice move",
                 amount=Decimal("5.00"),
                 date=datetime.date.today(),
                 transfer_id=bobs_transaction.id,
@@ -285,7 +289,7 @@ async def test_a_forged_parent_surfaces_as_404_not_500(
             "name": "Milk",
             "cost": "10.00",
             "frequency": "monthly",
-            "period": "2026-09-01",
+            "period": current_period().isoformat(),
         },
     )
 

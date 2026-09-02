@@ -20,6 +20,7 @@ from app.models.enums import Frequency, TransactionType
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.schemas.fields import current_period
 
 
 def make_user(**overrides: Any) -> User:
@@ -76,7 +77,6 @@ def make_category(**overrides: Any) -> Category:
         "id": uuid.uuid4(),
         "user_id": uuid.uuid4(),
         "name": "Test Category",
-        "system_type": None,
     }
     defaults.update(overrides)
     return Category(**defaults)
@@ -98,7 +98,9 @@ def make_expense(**overrides: Any) -> Expense:
         "amount_saved": Decimal("0"),
         "goal_amount": None,
         "goal_date": None,
-        "period": datetime.date.today(),
+        # First of the month, not today: the real table CHECKs it, so a factory
+        # default that ignores the rule would only fail in the Postgres tests.
+        "period": current_period(),
         "is_deleted": False,
         "user_id": uuid.uuid4(),
     }
@@ -111,6 +113,7 @@ def make_transaction(**overrides: Any) -> Transaction:
         "id": uuid.uuid4(),
         "expense_id": uuid.uuid4(),
         "type": TransactionType.SPEND,
+        "name": "Test Transaction",
         "amount": Decimal("10.00"),
         "note": None,
         "date": datetime.date.today(),

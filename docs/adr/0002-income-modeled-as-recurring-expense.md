@@ -1,6 +1,6 @@
 # Income modeled as a recurring Expense, not a separate mechanism
 
-**Status**: accepted
+**Status**: superseded by ADR-0009
 
 Income needs to roll forward monthly and be comparable against actuals the same way spending is, and it needs to appear in the same Rollover walk-forward logic without a special case.
 
@@ -9,3 +9,10 @@ We modeled income as a normal recurring Expense (e.g. "Salary") under a Category
 ## Consequences
 
 Planned-vs-actual comparisons, rollover, and budget-total queries all work uniformly across income and spending — but any code path that wants to treat "income" specially must filter by `Category.system_type == income` rather than by table or transaction type alone.
+
+---
+
+**Superseded by [ADR-0009](./0009-transaction-is-a-ledger-not-an-actual-against-a-plan.md).** The uniformity
+this bought was never exercised: income has no plan to be measured against, so an income
+Expense carried `cost` equal to its own actual and six other columns that meant nothing.
+Income is now a Transaction with a null `expense_id`.

@@ -1,4 +1,3 @@
-import datetime
 import json
 import uuid
 from collections.abc import Sequence
@@ -15,6 +14,7 @@ from app.models.user import User
 from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.category import CategoryCreate
 from app.schemas.expense import ExpenseCreate
+from app.schemas.fields import current_period
 from app.services.visibility import live_budgets
 
 _REQUIRED_EXPENSE_KEYS = {"tag", "name", "cost", "frequency", "amountSaved"}
@@ -29,18 +29,14 @@ async def create_budget(db: AsyncSession, user: User, data: BudgetCreate) -> Bud
     return budget
 
 
-async def get_budget(
-    db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
-) -> Budget | None:
+async def get_budget(db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID) -> Budget | None:
     result = await db.scalars(
         live_budgets().where(Budget.id == budget_id, Budget.user_id == user_id)
     )
     return result.one_or_none()
 
 
-async def list_budgets(
-    db: AsyncSession, user_id: uuid.UUID | None = None
-) -> Sequence[Budget]:
+async def list_budgets(db: AsyncSession, user_id: uuid.UUID | None = None) -> Sequence[Budget]:
     query = live_budgets()
     if user_id is not None:
         query = query.where(Budget.user_id == user_id)
@@ -110,9 +106,7 @@ async def convert_json_to_budget(
 
     # Check for existing categories
     matching_categories = await db.execute(
-        select(Category).where(
-            Category.user_id == user.id, Category.name.in_(category_names)
-        )
+        select(Category).where(Category.user_id == user.id, Category.name.in_(category_names))
     )
     for matching_category in matching_categories.scalars().all():
         category_names.remove(matching_category.name)
@@ -123,7 +117,7 @@ async def convert_json_to_budget(
     await db.flush()
 
     for category_name in category_names:
-        category_metadata = CategoryCreate(name=category_name, system_type=None)
+        category_metadata = CategoryCreate(name=category_name)
         category = Category(**category_metadata.model_dump(), user_id=user.id)
         db.add(category)
         await db.flush()
@@ -139,7 +133,10 @@ async def convert_json_to_budget(
             cost=Decimal(expense["cost"]),
             frequency=frequency,
             amount_saved=Decimal(expense["amountSaved"]),
-            period=datetime.date.today(),
+            # The open month, not today's date: Period is always the first of its
+            # month, and `date.today()` reads the local clock where the rest of the
+            # app reads UTC.
+            period=current_period(),
         )
 
         expense = Expense(**expense_metadata.model_dump(), user_id=user.id)
