@@ -5,15 +5,16 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import TransactionType
+from app.ownership import ExpenseRef, TransactionRef
 
 
 class TransactionCreate(BaseModel):
-    expense_id: uuid.UUID
+    expense_id: ExpenseRef
     type: TransactionType
     amount: Decimal
     note: str | None = None
     date: datetime.date
-    transfer_id: uuid.UUID | None = None
+    transfer_id: TransactionRef | None = None
 
 
 class TransactionUpdate(BaseModel):
@@ -21,7 +22,7 @@ class TransactionUpdate(BaseModel):
     amount: Decimal | None = None
     note: str | None = None
     date: datetime.date | None = None
-    transfer_id: uuid.UUID | None = None
+    transfer_id: TransactionRef | None = None
 
 
 class TransactionRead(BaseModel):
@@ -34,3 +35,4 @@ class TransactionRead(BaseModel):
     note: str | None
     date: datetime.date
     transfer_id: uuid.UUID | None
+    is_deleted: bool

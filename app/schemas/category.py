@@ -6,7 +6,6 @@ from app.models.enums import CategorySystemType
 
 
 class CategoryCreate(BaseModel):
-    user_id: uuid.UUID
     name: str
     system_type: CategorySystemType | None = None
 

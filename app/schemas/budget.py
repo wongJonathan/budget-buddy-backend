@@ -7,7 +7,6 @@ from app.schemas.expense import ExpenseRead
 
 
 class BudgetCreate(BaseModel):
-    user_id: uuid.UUID
     name: str
     note: str | None = None
 

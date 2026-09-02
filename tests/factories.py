@@ -10,6 +10,9 @@ import datetime
 import uuid
 from decimal import Decimal
 from typing import Any
+from unittest.mock import MagicMock
+
+from fastapi import Request
 
 from app.models.budget import Budget
 from app.models.category import Category
@@ -25,9 +28,34 @@ def make_user(**overrides: Any) -> User:
         "display_name": "Test User",
         "active_budget_id": None,
         "last_active": datetime.date.today(),
+        # NOT NULL in the real table, so these have to be present for any test that
+        # actually inserts the row. The email is randomised because it's UNIQUE.
+        "email": f"user-{uuid.uuid4().hex[:12]}@example.com",
+        "hashed_password": "not-a-real-hash",
     }
     defaults.update(overrides)
     return User(**defaults)
+
+
+def make_request(
+    headers: dict[str, str] | None = None,
+    method: str = "POST",
+    client: tuple[str, int] | None = ("127.0.0.1", 54321),
+) -> Request:
+    """A Request built straight from an ASGI scope - no app, no transport.
+
+    For unit-testing the handful of functions that read raw headers or the peer
+    address (`audit.client_ip`, `csrf.origin_check`) without standing up a client.
+    """
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": "/",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+            "client": client,
+        }
+    )
 
 
 def make_budget(**overrides: Any) -> Budget:
@@ -71,7 +99,8 @@ def make_expense(**overrides: Any) -> Expense:
         "goal_amount": None,
         "goal_date": None,
         "period": datetime.date.today(),
-        "is_deactivated": False,
+        "is_deleted": False,
+        "user_id": uuid.uuid4(),
     }
     defaults.update(overrides)
     return Expense(**defaults)
@@ -86,6 +115,24 @@ def make_transaction(**overrides: Any) -> Transaction:
         "note": None,
         "date": datetime.date.today(),
         "transfer_id": None,
+        "is_deleted": False,
+        "user_id": uuid.uuid4(),
     }
     defaults.update(overrides)
     return Transaction(**defaults)
+
+
+def make_scalars_one(obj: object | None) -> MagicMock:
+    """A fake `ScalarResult` for stubbing `mock_db.scalars`.
+
+    Distinct from the `make_scalars_result` fixture, which fakes the `Result` returned
+    by `db.execute` and is consumed as `.scalars().all()`. This one fakes what
+    `db.scalars` returns directly, consumed as `.one_or_none()` - the shape every
+    get_* service uses now that fetch-by-id goes through a visibility-filtered
+    select() rather than db.get().
+    """
+    result = MagicMock()
+    result.one_or_none.return_value = obj
+    result.first.return_value = obj
+    result.all.return_value = [] if obj is None else [obj]
+    return result

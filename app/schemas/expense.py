@@ -5,11 +5,12 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import Frequency
+from app.ownership import BudgetRef, CategoryRef
 
 
 class ExpenseCreate(BaseModel):
-    budget_id: uuid.UUID
-    category_id: uuid.UUID
+    budget_id: BudgetRef
+    category_id: CategoryRef
     name: str
     note: str | None = None
     cost: Decimal
@@ -47,4 +48,4 @@ class ExpenseRead(BaseModel):
     goal_amount: Decimal | None
     goal_date: date | None
     period: date
-    is_deactivated: bool
+    is_deleted: bool
