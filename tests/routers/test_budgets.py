@@ -1,3 +1,11 @@
+"""Tests for app/routers/budgets.py.
+
+Every route sits behind `CurrentUser`, so these use `authed_client`; the 401
+path is asserted separately at the bottom with the plain `client`. The service
+behind `POST /budgets/json-convert-budget` is tested in
+tests/services/test_budget.py.
+"""
+
 import datetime
 import json
 import uuid
@@ -8,9 +16,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.user import User
-from app.services import budget as budget_service
-from app.services.budget import _get_frequency
-from tests.factories import make_budget, make_category, make_expense, make_scalars_one
+from tests.factories import make_budget, make_expense, make_scalars_one
 
 # ---------------------------------------------------------------------------
 # Router: create / read / update / delete
@@ -168,114 +174,44 @@ async def test_get_budget_explicit_period_and_include_deleted(
 
 
 # ---------------------------------------------------------------------------
-# Service: _get_frequency (pure function, no DB involved)
+# Router: authentication
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("method", "path"),
     [
-        ("Once", budget_service.Frequency.ONCE),
-        ("Daily", budget_service.Frequency.DAILY),
-        ("Weekly", budget_service.Frequency.WEEKLY),
-        ("Monthly", budget_service.Frequency.MONTHLY),
-        ("Yearly", budget_service.Frequency.YEARLY),
-        ("Set date", budget_service.Frequency.ONCE),
+        ("POST", "/budgets"),
+        ("GET", "/budgets/{budget_id}"),
+        ("PATCH", "/budgets/{budget_id}"),
+        ("DELETE", "/budgets/{budget_id}"),
+        ("POST", "/budgets/json-convert-budget"),
     ],
 )
-def test_get_frequency_recognized(raw: str, expected: budget_service.Frequency) -> None:
-    assert _get_frequency(raw) == expected
+async def test_budget_routes_require_a_session(
+    client: AsyncClient, mock_db: MagicMock, method: str, path: str
+) -> None:
+    """No route on this router is reachable without a session.
 
+    `mock_db` is stubbed to return a budget, so a 401 here can only come from the
+    auth dependency - not from the row being missing.
+    """
+    mock_db.scalars.return_value = make_scalars_one(make_budget())
 
-def test_get_frequency_unrecognized_raises() -> None:
-    with pytest.raises(ValueError, match="not recognized"):
-        _get_frequency("Fortnightly")
+    response = await client.request(
+        method, path.format(budget_id=uuid.uuid4()), json={"name": "Groceries Budget"}
+    )
+
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# Service: convert_json_to_budget
+# Router: POST /budgets/json-convert-budget
 # ---------------------------------------------------------------------------
 
 
 def _expenses_json(**entries: dict[str, object]) -> bytes:
     return json.dumps(entries).encode()
-
-
-async def test_convert_json_to_budget_creates_budget_categories_expenses(
-    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock], current_user: User
-) -> None:
-    from app.schemas.budget import BudgetCreate
-
-    mock_db.execute.return_value = make_scalars_result([])  # no existing categories
-    metadata = BudgetCreate(name="Imported Budget")
-    file_bytes = _expenses_json(
-        e1={
-            "tag": "Groceries",
-            "name": "Weekly shop",
-            "cost": "50.00",
-            "frequency": "Monthly",
-            "amountSaved": "0",
-            "note": None,
-        },
-        e2={
-            "tag": "Rent",
-            "name": "Rent",
-            "cost": "1200",
-            "frequency": "Monthly",
-            "amountSaved": "0",
-            "note": None,
-        },
-        skip_me={"transactionType": "expense", "amount": "10"},
-    )
-
-    budget = await budget_service.convert_json_to_budget(
-        mock_db, metadata, file_bytes, current_user
-    )
-
-    assert budget.name == "Imported Budget"
-    # 1 budget + 2 categories + 2 expenses (the transactionType row is skipped)
-    assert mock_db.add.call_count == 5
-    mock_db.commit.assert_awaited_once()
-
-
-async def test_convert_json_to_budget_reuses_existing_category(
-    mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock], current_user: User
-) -> None:
-    from app.schemas.budget import BudgetCreate
-
-    existing = make_category(user_id=current_user.id, name="Groceries")
-    mock_db.execute.return_value = make_scalars_result([existing])
-    metadata = BudgetCreate(name="Imported Budget")
-    file_bytes = _expenses_json(
-        e1={
-            "tag": "Groceries",
-            "name": "Weekly shop",
-            "cost": "50.00",
-            "frequency": "Monthly",
-            "amountSaved": "0",
-            "note": None,
-        },
-    )
-
-    await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes, current_user)
-
-    # 1 budget + 1 expense, no new category (Groceries already existed)
-    assert mock_db.add.call_count == 2
-
-
-async def test_convert_json_to_budget_missing_required_key_raises(
-    mock_db: MagicMock, current_user: User
-) -> None:
-    from app.schemas.budget import BudgetCreate
-
-    metadata = BudgetCreate(name="Imported Budget")
-    # missing cost/frequency/amountSaved
-    file_bytes = _expenses_json(e1={"tag": "Groceries", "name": "Weekly shop"})
-
-    with pytest.raises(ValueError, match="missing required field"):
-        await budget_service.convert_json_to_budget(mock_db, metadata, file_bytes, current_user)
-
-    mock_db.commit.assert_not_awaited()
 
 
 async def test_json_convert_budget_endpoint(
@@ -319,35 +255,3 @@ async def test_json_convert_budget_endpoint_missing_key_is_error(
     assert response.status_code == 400
     assert "missing required field" in response.json()["detail"]
     mock_db.commit.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Router: authentication
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("POST", "/budgets"),
-        ("GET", "/budgets/{budget_id}"),
-        ("PATCH", "/budgets/{budget_id}"),
-        ("DELETE", "/budgets/{budget_id}"),
-        ("POST", "/budgets/json-convert-budget"),
-    ],
-)
-async def test_budget_routes_require_a_session(
-    client: AsyncClient, mock_db: MagicMock, method: str, path: str
-) -> None:
-    """No route on this router is reachable without a session.
-
-    `mock_db` is stubbed to return a budget, so a 401 here can only come from the
-    auth dependency - not from the row being missing.
-    """
-    mock_db.scalars.return_value = make_scalars_one(make_budget())
-
-    response = await client.request(
-        method, path.format(budget_id=uuid.uuid4()), json={"name": "Groceries Budget"}
-    )
-
-    assert response.status_code == 401
