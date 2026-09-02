@@ -1,6 +1,8 @@
+from collections.abc import Sequence
+
 from fastapi import APIRouter, status
 
-from app.dependencies import CurrentUser, DbSession, OwnedCategories
+from app.dependencies import CurrentUser, DbSession, OwnedCategory
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryRead, CategoryUpdate
 from app.services import category as category_service
@@ -16,17 +18,22 @@ async def create_category(
 
 
 @router.get("/{category_id}", response_model=CategoryRead)
-async def get_category(category: OwnedCategories, db: DbSession) -> Category:
+async def get_category(category: OwnedCategory) -> Category:
     return category
+
+
+@router.get("", response_model=list[CategoryRead])
+async def get_categories(user: CurrentUser, db: DbSession) -> Sequence[Category]:
+    return await category_service.list_categories(db, user)
 
 
 @router.patch("/{category_id}", response_model=CategoryRead)
 async def update_category(
-    category: OwnedCategories, data: CategoryUpdate, db: DbSession
+    category: OwnedCategory, data: CategoryUpdate, db: DbSession
 ) -> Category:
     return await category_service.update_category(db, category, data)
 
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_category(category: OwnedCategories, db: DbSession) -> None:
+async def delete_category(category: OwnedCategory, db: DbSession) -> None:
     await category_service.delete_category(db, category)

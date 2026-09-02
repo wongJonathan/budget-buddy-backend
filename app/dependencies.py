@@ -67,4 +67,4 @@ OwnedExpense = Annotated[Expense, Depends(owned_path(Expense, "expense_id"))]
 OwnedTransaction = Annotated[
     Transaction, Depends(owned_path(Transaction, "transaction_id"))
 ]
-OwnedCategories = Annotated[Category, Depends(owned_path(Category, "category_id"))]
+OwnedCategory = Annotated[Category, Depends(owned_path(Category, "category_id"))]
