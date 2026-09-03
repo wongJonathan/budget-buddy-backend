@@ -14,10 +14,16 @@ from app.services import transaction as transaction_service
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
-@router.post("", response_model=TransactionRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=list[TransactionRead], status_code=status.HTTP_201_CREATED)
 async def create_transaction(
     user: CurrentUser, data: TransactionCreate, db: DbSession
-) -> Transaction:
+) -> list[Transaction]:
+    """
+    Handles creating all the transaction logic where the caller does a simple save, spend, transfer
+    and depending on the type of transaction it can create multiple transaction rows (spend_saved
+    and spend if a savings amount is fully used)
+
+    """
     return await transaction_service.create_transaction(db, user, data)
 
 
@@ -33,7 +39,10 @@ async def get_transaction(transaction: OwnedTransaction) -> Transaction:
 
 @router.patch("/{transaction_id}", response_model=TransactionRead)
 async def update_transaction(
-    transaction: OwnedTransaction, data: TransactionUpdate, user: CurrentUser, db: DbSession
+    transaction: OwnedTransaction,
+    data: TransactionUpdate,
+    user: CurrentUser,
+    db: DbSession,
 ) -> Transaction:
     return await transaction_service.update_transaction(db, transaction, data, user)
 

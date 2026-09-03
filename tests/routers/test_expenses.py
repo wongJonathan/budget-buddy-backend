@@ -37,7 +37,8 @@ async def test_create_expense(authed_client: AsyncClient, mock_db: MagicMock) ->
     assert body["name"] == "Groceries"
     assert body["frequency"] == "monthly"
     assert Decimal(body["cost"]) == Decimal("100.00")
-    assert Decimal(body["amount_saved"]) == Decimal("0")
+    # No fund until money is saved against it - see docs/adr/0011.
+    assert body["savings_id"] is None
     assert uuid.UUID(body["series_id"])
     mock_db.add.assert_called_once()
     mock_db.commit.assert_awaited_once()

@@ -78,6 +78,18 @@ async def seed_chain(db: AsyncSession) -> tuple[User, Budget, Expense, Transacti
     return user, budget, expense, transaction
 
 
+async def delete_budget(db: AsyncSession, user: User, budget: Budget) -> None:
+    """Stand the Budget down, then delete it.
+
+    The active Budget cannot be deleted (docs/adr/0011) and `seed_chain` activates the
+    one it makes, so anything here that deletes it has to deactivate first. That is the
+    real calling sequence, not a test workaround.
+    """
+    user.active_budget_id = None
+    await db.flush()
+    await budget_service.soft_delete_budget(db, budget, user)
+
+
 # ---------------------------------------------------------------------------
 # visibility is derived from ancestors
 # ---------------------------------------------------------------------------
@@ -99,7 +111,7 @@ async def test_soft_deleting_a_budget_hides_its_expenses_and_transactions(
     rows rewritten."""
     user, budget, _, _ = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget)
+    await delete_budget(db_session, user, budget)
 
     assert await budget_service.list_budgets(db_session) == []
     assert await expense_service.list_expenses(db_session, user) == []
@@ -108,9 +120,9 @@ async def test_soft_deleting_a_budget_hides_its_expenses_and_transactions(
 
 async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None:
     """Hidden, not deleted - which is what makes restore possible later."""
-    _, budget, _, _ = await seed_chain(db_session)
+    user, budget, _, _ = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget)
+    await delete_budget(db_session, user, budget)
 
     assert len((await db_session.scalars(select(Expense))).all()) == 1
     assert len((await db_session.scalars(select(Transaction))).all()) == 1
@@ -163,7 +175,7 @@ async def test_an_expense_under_a_deleted_budget_is_unreachable_by_id(
     """The Expense's own flag is untouched here - it's hidden purely by its ancestor."""
     user, budget, expense, transaction = await seed_chain(db_session)
 
-    await budget_service.soft_delete_budget(db_session, budget)
+    await delete_budget(db_session, user, budget)
 
     assert await expense_service.get_expense(db_session, expense.id, user.id) is None
     assert await transaction_service.get_transaction(db_session, transaction.id, user.id) is None
@@ -193,8 +205,8 @@ async def test_include_deleted_never_surfaces_children_of_a_deleted_budget(
 ) -> None:
     """include_deleted relaxes the row's own flag, never an ancestor's - a deleted
     parent is what "deleted" means for the child."""
-    _, budget, _, _ = await seed_chain(db_session)
-    await budget_service.soft_delete_budget(db_session, budget)
+    user, budget, _, _ = await seed_chain(db_session)
+    await delete_budget(db_session, user, budget)
 
     visible = await expense_service.list_budget_expenses(
         db_session, budget.id, datetime.date.today(), include_deleted=True
@@ -302,7 +314,7 @@ async def test_income_survives_deleting_the_budget(db_session: AsyncSession) -> 
     user, budget, _, _ = await seed_chain(db_session)
     income = await _income(db_session, user)
 
-    await budget_service.soft_delete_budget(db_session, budget)
+    await delete_budget(db_session, user, budget)
     visible = await transaction_service.list_transactions(db_session, user)
 
     assert [t.id for t in visible] == [income.id]

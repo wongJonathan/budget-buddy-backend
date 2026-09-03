@@ -80,5 +80,5 @@ async def update_budget(
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_budget(budget: OwnedBudget, db: DbSession) -> None:
-    await budget_service.soft_delete_budget(db, budget)
+async def delete_budget(budget: OwnedBudget, user: CurrentUser, db: DbSession) -> None:
+    await budget_service.soft_delete_budget(db, budget, user)

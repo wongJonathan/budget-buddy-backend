@@ -48,7 +48,9 @@ class Expense(UUIDPrimaryKeyMixin, Base):
         # A row written with today's real date instead makes `period =` comparisons,
         # the unique constraint above, and Rollover's exact-match reuse all stop
         # matching - silently, since nothing errors. See docs/adr/0010.
-        CheckConstraint("EXTRACT(DAY FROM period) = 1", name="ck_expense_period_first_of_month"),
+        CheckConstraint(
+            "EXTRACT(DAY FROM period) = 1", name="ck_expense_period_first_of_month"
+        ),
     )
 
     budget_id: Mapped[uuid.UUID] = mapped_column(
@@ -63,11 +65,18 @@ class Expense(UUIDPrimaryKeyMixin, Base):
     name: Mapped[str] = mapped_column()
     note: Mapped[str | None] = mapped_column(default=None)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    frequency: Mapped[Frequency] = mapped_column(pg_enum(Frequency, "expense_frequency"))
+    frequency: Mapped[Frequency] = mapped_column(
+        pg_enum(Frequency, "expense_frequency")
+    )
     monthly_cost: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), Computed(_MONTHLY_COST_EXPR, persisted=True)
     )
-    amount_saved: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    savings_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("savings.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
     goal_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)
     goal_date: Mapped[date | None] = mapped_column(Date, default=None)
     period: Mapped[date] = mapped_column(Date)  # Meant for roll over calculation

@@ -223,7 +223,7 @@ async def test_a_transfer_cannot_point_at_another_users_transaction(
     bobs_expense = await expense_service.create_expense(
         db_session, _expense_payload(bob_budget, bob_category), bob
     )
-    bobs_transaction = await transaction_service.create_transaction(
+    bobs_rows = await transaction_service.create_transaction(
         db_session,
         bob,
         TransactionCreate(
@@ -234,14 +234,18 @@ async def test_a_transfer_cannot_point_at_another_users_transaction(
             date=datetime.date.today(),
         ),
     )
+    (bobs_transaction,) = bobs_rows
 
+    # A `spend`, not a `transfer`: the transfer type is server-written and rejected on
+    # the way in (docs/adr/0011), but `transfer_id` is still a client-supplied reference
+    # and it is the ownership of *that* which is under test here.
     with pytest.raises(NotOwned, match="Transaction not found"):
         await transaction_service.create_transaction(
             db_session,
             alice,
             TransactionCreate(
                 expense_id=alices_expense.id,
-                type=TransactionType.TRANSFER,
+                type=TransactionType.SPEND,
                 name="Alice move",
                 amount=Decimal("5.00"),
                 date=datetime.date.today(),

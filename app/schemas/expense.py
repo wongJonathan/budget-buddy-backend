@@ -16,7 +16,6 @@ class ExpenseCreate(BaseModel):
     note: str | None = None
     cost: Decimal
     frequency: Frequency
-    amount_saved: Decimal = Decimal(0)
     goal_amount: Decimal | None = None
     goal_date: date | None = None
     period: CurrentPeriod
@@ -27,7 +26,6 @@ class ExpenseUpdate(BaseModel):
     note: str | None = None
     cost: Decimal | None = None
     frequency: Frequency | None = None
-    amount_saved: Decimal | None = None
     goal_amount: Decimal | None = None
     goal_date: date | None = None
     period: CurrentPeriod | None = None
@@ -45,7 +43,7 @@ class ExpenseRead(BaseModel):
     cost: Decimal
     frequency: Frequency
     monthly_cost: Decimal
-    amount_saved: Decimal
+    savings_id: uuid.UUID | None
     goal_amount: Decimal | None
     goal_date: date | None
     period: date

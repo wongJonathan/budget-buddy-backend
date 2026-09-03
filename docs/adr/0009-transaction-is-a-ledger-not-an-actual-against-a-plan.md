@@ -1,6 +1,6 @@
 # Transaction is a ledger of money movement, not an actual measured against a plan
 
-**Status**: accepted (supersedes ADR-0002)
+**Status**: accepted (supersedes ADR-0002; `saving_goal` reasoning amended by ADR-0011)
 
 ADR 0002 modeled income as a recurring Expense so that rollover, planned-vs-actual and
 budget totals would work uniformly across income and spending. In practice income has no
@@ -44,6 +44,7 @@ from. Expense-linked rows carry a name too rather than deriving one.
 
 `Category.system_type` is dropped entirely along with the `category_system_type` enum type.
 Its three members are all gone: `income` because income is no longer an Expense, `saving_goal`
-because `Expense.goal_amount` / `goal_date` / `amount_saved` already carry a savings goal
-without the Category knowing, and `debt` because a carried-forward Expense is an ordinary
-Expense (see ADR-0010). A Category is now a user-owned label with no business-logic role.
+because a savings goal is carried without the Category knowing (at the time by
+`Expense.goal_amount` / `goal_date` / `amount_saved`; `amount_saved` has since moved to a
+separate Savings entity per ADR-0011, which does not change the conclusion here), and `debt`
+because a carried-forward Expense is an ordinary Expense (see ADR-0010). A Category is now a user-owned label with no business-logic role.

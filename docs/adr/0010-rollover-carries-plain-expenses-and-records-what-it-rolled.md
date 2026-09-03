@@ -1,12 +1,16 @@
 # Rollover carries plain Expenses, and records what it rolled rather than inferring it
 
-**Status**: accepted
+**Status**: accepted (definition of *met* amended by ADR-0011)
 
 Rollover runs as a scheduled job. An Expense is **met** when its Transactions total at least
 its `monthly_cost` - for every frequency, not just `monthly`, so that `yearly` and `custom`
 rows are measured against the same normalized per-period figure the rest of the app uses.
 An unmet Expense is carried into the next Period regardless of its frequency; a met Expense
 with `frequency = once` is not.
+
+> **Amended by ADR-0011**: only *pool-drawing* Transactions count - `SAVE` and `SPEND`, not
+> `SPEND_SAVED` or `TRANSFER`. Money spent from a savings fund was already counted toward Met
+> when it was saved, so counting it again at spend time double-counts a single allocation.
 
 A carried Expense is an ordinary Expense with `frequency = once` and **no marker of any kind**
 - no flag, no reserved Category, no link back to the shortfall it came from. It rolls, gets

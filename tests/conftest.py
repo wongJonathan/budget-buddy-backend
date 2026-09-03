@@ -3,7 +3,6 @@ import datetime
 import os
 import uuid
 from collections.abc import AsyncGenerator, Callable, Sequence
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,6 +24,7 @@ from app.main import app
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
 from tests.factories import make_scalars_one, make_user
@@ -46,8 +46,6 @@ def _fake_refresh(obj: object) -> None:
     elif isinstance(obj, Expense):
         if obj.series_id is None:
             obj.series_id = uuid.uuid4()
-        if obj.amount_saved is None:
-            obj.amount_saved = Decimal("0")
         if obj.is_deleted is None:
             obj.is_deleted = False
         if obj.monthly_cost is None:
@@ -57,7 +55,7 @@ def _fake_refresh(obj: object) -> None:
     elif isinstance(obj, User):
         if obj.last_active is None:
             obj.last_active = datetime.date.today()
-    elif isinstance(obj, Transaction):
+    elif isinstance(obj, Transaction | Savings):
         if obj.is_deleted is None:
             obj.is_deleted = False
     elif isinstance(obj, Category):

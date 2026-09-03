@@ -95,7 +95,8 @@ def make_expense(**overrides: Any) -> Expense:
         # NOT COVERED: mocked session, see checklist.md — monthly_cost is a Postgres
         # GENERATED column in reality; this is a plausible fake, not computed SQL.
         "monthly_cost": Decimal("10.00"),
-        "amount_saved": Decimal("0"),
+        # No fund by default: one exists only because money went into it.
+        "savings_id": None,
         "goal_amount": None,
         "goal_date": None,
         # First of the month, not today: the real table CHECKs it, so a factory

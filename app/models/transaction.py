@@ -11,7 +11,7 @@ from app.models.enums import TransactionType, pg_enum
 
 
 class Transaction(UUIDPrimaryKeyMixin, Base):
-    """Any change to the money available to a User - in, out, or between Expenses."""
+    """Any change to the money available to a User - in, out, or between Pool and fund."""
 
     __tablename__ = "transactions"
 
@@ -21,9 +21,23 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
         ForeignKey("expenses.id", ondelete="CASCADE"),
         default=None,
     )
-    type: Mapped[TransactionType] = mapped_column(
-        pg_enum(TransactionType, "transaction_type")
+    # Which fund this money moved, recorded here rather than derived through
+    # `expense_id -> Expense.savings_id`. Not a duplicate of that column: this is the
+    # fund the money *went into*, a historical fact that must never change, while
+    # `Expense.savings_id` is the fund a lineage *currently funds* and is re-pointable
+    # once Activation takes a reallocation map. Deriving it would rewrite history the
+    # moment a lineage was re-pointed, and would also make a balance depend on whether
+    # the Expense happened to be soft-deleted. See docs/adr/0011.
+    #
+    # Non-null on exactly the rows that move a fund - SAVE, SPEND_SAVED, and the fund
+    # side of a TRANSFER pair. Null on SPEND, INCOME and a transfer's Pool side.
+    savings_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("savings.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
     )
+    type: Mapped[TransactionType] = mapped_column(pg_enum(TransactionType, "transaction_type"))
     name: Mapped[str] = mapped_column()
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)

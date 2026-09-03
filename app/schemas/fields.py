@@ -18,6 +18,8 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BeforeValidator, EmailStr
 
+from app.models.enums import TransactionType
+
 
 def normalize_email(value: str) -> str:
     """The canonical form: trimmed and lowercased."""
@@ -64,6 +66,21 @@ def _to_current_period(value: datetime.date) -> datetime.date:
             "expenses cannot be written ahead of it or behind it"
         )
     return period
+
+
+_SERVER_ONLY_TYPES = frozenset({TransactionType.SPEND_SAVED, TransactionType.TRANSFER})
+
+
+def _reject_server_only(value: TransactionType) -> TransactionType:
+    if value in _SERVER_ONLY_TYPES:
+        raise ValueError(
+            f"'{value.value}' transactions are written by the server, not posted "
+            "directly; spend against the expense and the split is computed for you"
+        )
+    return value
+
+
+ClientTransactionType = Annotated[TransactionType, AfterValidator(_reject_server_only)]
 
 
 # Truncates and then constrains: a payload dated anywhere inside the open month is

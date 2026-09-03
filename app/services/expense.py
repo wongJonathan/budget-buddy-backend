@@ -5,11 +5,44 @@ from collections.abc import Sequence
 from sqlalchemy import extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import AppError
 from app.models.expense import Expense
 from app.models.user import User
 from app.ownership import verify_owned_refs
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
+from app.schemas.fields import current_period
+from app.services import savings as savings_service
 from app.services.visibility import live_expenses
+
+
+class ClosedPeriod(AppError):
+    """An edit or delete aimed at an Expense outside the open Period.
+
+    409 rather than 404: the row exists and is the caller's. What is refused is
+    rewriting a month Rollover may already have acted on - a late change to a
+    historical `cost` silently changes a shortfall that was already carried, and
+    deleting a historical row would drain a Savings that later Periods still use
+    (docs/adr/0011).
+    """
+
+    def __init__(self, period: datetime.date) -> None:
+        super().__init__(
+            f"expense belongs to a closed period ({period.isoformat()}); only the "
+            f"current one ({current_period().isoformat()}) can be edited or deleted",
+            status_code=409,
+        )
+
+
+def _require_open_period(expense: Expense) -> None:
+    """Guard for the write paths that take an existing row.
+
+    `CurrentPeriod` on the schema constrains *where a row is written to*; this
+    constrains *which rows may be touched at all*. They are different rules, and
+    only the first is expressible as field validation - an update that omits
+    `period` never reaches it.
+    """
+    if expense.period != current_period():
+        raise ClosedPeriod(expense.period)
 
 
 async def create_expense(db: AsyncSession, data: ExpenseCreate, user: User) -> Expense:
@@ -46,6 +79,7 @@ async def list_expenses(db: AsyncSession, user: User) -> Sequence[Expense]:
 
 
 async def update_expense(db: AsyncSession, expense: Expense, data: ExpenseUpdate) -> Expense:
+    _require_open_period(expense)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(expense, field, value)
     await db.commit()
@@ -54,6 +88,16 @@ async def update_expense(db: AsyncSession, expense: Expense, data: ExpenseUpdate
 
 
 async def soft_delete_expense(db: AsyncSession, expense: Expense) -> None:
+    """Delete the Expense, and close the fund it was the live intention for.
+
+    Deleting the current-Period row is the user saying they are not doing this any more,
+    so the lineage's fund is drained back to the Pool and closed - money set aside for a
+    plan that no longer exists belongs back in the Pool, not stranded behind a deleted
+    row (docs/adr/0011). A historical row never reaches here: `_require_open_period`
+    refuses it, which is what stops one month's tidy-up destroying a year of savings.
+    """
+    _require_open_period(expense)
+    await savings_service.close_savings(db, expense)
     expense.is_deleted = True
     await db.commit()
 
