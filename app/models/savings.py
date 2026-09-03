@@ -28,9 +28,10 @@ from app.database import Base, UUIDPrimaryKeyMixin
 
 
 class Savings(UUIDPrimaryKeyMixin, Base):
-    """
-    Tracks the money saved for an expense.
-    Total is determined by deriving it from all saved and spend saved transactions for a given expense
+    """Tracks the money saved for an expense.
+
+    Total is determined by deriving it from all saved and spend saved transactions for a
+    given expense.
     """
 
     __tablename__ = "savings"

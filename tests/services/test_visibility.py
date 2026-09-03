@@ -9,6 +9,7 @@ See docs/adr/0007-derived-soft-delete-visibility.md.
 
 import datetime
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -104,18 +105,24 @@ async def test_a_seeded_chain_is_visible_to_start_with(db_session: AsyncSession)
     assert len(await transaction_service.list_transactions(db_session, user)) == 1
 
 
-async def test_soft_deleting_a_budget_hides_its_expenses_and_transactions(
+async def test_soft_deleting_a_budget_hides_its_expenses_but_not_its_transactions(
     db_session: AsyncSession,
 ) -> None:
-    """The whole point of deriving visibility: one flag, two levels below it, and no
-    rows rewritten."""
-    user, budget, _, _ = await seed_chain(db_session)
+    """The whole point of deriving visibility: one flag, the level below it, and no rows
+    rewritten.
+
+    The Transactions stay. The ancestor rule runs from Budget to Expense and stops -
+    a Transaction records a movement of the User's money, and deleting the plan it was
+    measured against does not unspend it. See ADR-0007 as amended.
+    """
+    user, budget, _, transaction = await seed_chain(db_session)
 
     await delete_budget(db_session, user, budget)
 
     assert await budget_service.list_budgets(db_session) == []
     assert await expense_service.list_expenses(db_session, user) == []
-    assert await transaction_service.list_transactions(db_session, user) == []
+    visible = await transaction_service.list_transactions(db_session, user)
+    assert [t.id for t in visible] == [transaction.id]
 
 
 async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None:
@@ -128,15 +135,18 @@ async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None
     assert len((await db_session.scalars(select(Transaction))).all()) == 1
 
 
-async def test_soft_deleting_an_expense_hides_its_transactions(
+async def test_soft_deleting_an_expense_leaves_its_transactions_on_the_record(
     db_session: AsyncSession,
 ) -> None:
-    user, _, expense, _ = await seed_chain(db_session)
+    """Deleting the plan removes the plan. The GBP 5 still left the account, and a sum
+    over money that dropped it would quietly hand the User their spending back."""
+    user, _, expense, transaction = await seed_chain(db_session)
 
     await expense_service.soft_delete_expense(db_session, expense)
 
     assert await expense_service.list_expenses(db_session, user) == []
-    assert await transaction_service.list_transactions(db_session, user) == []
+    visible = await transaction_service.list_transactions(db_session, user)
+    assert [t.id for t in visible] == [transaction.id]
 
 
 async def test_soft_deleting_a_transaction_leaves_its_parents_alone(
@@ -172,13 +182,18 @@ async def test_a_soft_deleted_expense_is_unreachable_by_id(
 async def test_an_expense_under_a_deleted_budget_is_unreachable_by_id(
     db_session: AsyncSession,
 ) -> None:
-    """The Expense's own flag is untouched here - it's hidden purely by its ancestor."""
+    """The Expense's own flag is untouched here - it's hidden purely by its ancestor.
+
+    Its Transaction stays fetchable, which is what makes it referenceable as a
+    `transfer_id` parent even after the plan above it is gone.
+    """
     user, budget, expense, transaction = await seed_chain(db_session)
 
     await delete_budget(db_session, user, budget)
 
     assert await expense_service.get_expense(db_session, expense.id, user.id) is None
-    assert await transaction_service.get_transaction(db_session, transaction.id, user.id) is None
+    fetched = await transaction_service.get_transaction(db_session, transaction.id, user.id)
+    assert fetched is not None and fetched.id == transaction.id
 
 
 # ---------------------------------------------------------------------------
@@ -310,14 +325,19 @@ async def test_income_with_no_expense_is_visible(db_session: AsyncSession) -> No
 
 
 async def test_income_survives_deleting_the_budget(db_session: AsyncSession) -> None:
-    """It has no Budget to be hidden by - that is the point of the null."""
-    user, budget, _, _ = await seed_chain(db_session)
+    """It has no Budget to be hidden by - that is the point of the null.
+
+    Since ADR-0007 was amended the expense-linked Spend survives too, so this no longer
+    distinguishes income from anything else. It is kept because income reaching the list
+    through a null `expense_id` is the case a stray inner join would silently break.
+    """
+    user, budget, _, spend = await seed_chain(db_session)
     income = await _income(db_session, user)
 
     await delete_budget(db_session, user, budget)
     visible = await transaction_service.list_transactions(db_session, user)
 
-    assert [t.id for t in visible] == [income.id]
+    assert {t.id for t in visible} == {income.id, spend.id}
 
 
 async def test_income_is_hidden_once_it_is_itself_deleted(db_session: AsyncSession) -> None:
@@ -350,3 +370,57 @@ async def test_income_belongs_to_its_owner_only(db_session: AsyncSession) -> Non
     assert all(
         t.user_id == bob.id for t in await transaction_service.list_transactions(db_session, bob)
     )
+
+
+# ---------------------------------------------------------------------------
+# the ancestor rule stops at Expense, because money is not a plan
+# ---------------------------------------------------------------------------
+
+
+async def test_deleting_an_expense_does_not_unspend_its_transactions(
+    db_session: AsyncSession,
+) -> None:
+    """The regression this amendment exists for.
+
+    Any sum over money counts Transactions. While Transaction was subject to the
+    ancestor rule, deleting an Expense dropped every Spend beneath it from that sum, and
+    the User's Pool silently rose by everything they had spent on it - money conjured
+    from a delete. See ADR-0007 as amended.
+    """
+    user, _, expense, _ = await seed_chain(db_session)  # seeds a GBP 5.00 spend
+    income = Transaction(
+        user_id=user.id,
+        type=TransactionType.INCOME,
+        name="Salary",
+        amount=Decimal("1000.00"),
+        date=datetime.date.today(),
+    )
+    db_session.add(income)
+    await db_session.commit()
+
+    def pool(rows: Sequence[Transaction]) -> Decimal:
+        total = Decimal(0)
+        for row in rows:
+            if row.type is TransactionType.INCOME:
+                total += row.amount
+            elif row.type in (TransactionType.SAVE, TransactionType.SPEND):
+                total -= row.amount
+            elif row.type is TransactionType.TRANSFER and row.expense_id is None:
+                total += row.amount
+        return total
+
+    before = pool(await transaction_service.list_transactions(db_session, user))
+    await expense_service.soft_delete_expense(db_session, expense)
+    after = pool(await transaction_service.list_transactions(db_session, user))
+
+    assert before == Decimal("995.00")
+    assert after == before
+
+
+async def test_a_deleted_transaction_is_still_hidden(db_session: AsyncSession) -> None:
+    """The rule that remains: a Transaction's own flag is the only thing that hides it."""
+    user, _, _, transaction = await seed_chain(db_session)
+
+    await transaction_service.soft_delete_transaction(db_session, transaction)
+
+    assert await transaction_service.list_transactions(db_session, user) == []

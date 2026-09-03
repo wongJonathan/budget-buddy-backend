@@ -1,15 +1,19 @@
 """Savings funds, and the balances derived from the ledger.
 
-A fund stores no balance. It is the sum of the Transactions on the Expense lineage
-pointing at it, which is what stops the number drifting the way `Expense.amount_saved`
+A fund stores no balance. It is the sum of the Transactions stamped with its
+`savings_id`, which is what stops the number drifting the way `Expense.amount_saved`
 did - there is no second copy to forget to update in a write path.
 
     fund(S) = SAVE - SPEND_SAVED - TRANSFER
 
-`TRANSFER` appears once, not twice: a transfer pair is one row carrying the source
-`expense_id` and one with a null `expense_id` for the Pool side. Only the first joins to
-an Expense, so only the fund side is counted here, and the Pool side lands in the Pool
-sum instead. `INCOME` and `SPEND` never touch a fund.
+`TRANSFER` appears once, not twice: only the fund side of a transfer pair is stamped, so
+the Pool side lands in the Pool sum instead. `INCOME` and `SPEND` never touch a fund and
+are never stamped.
+
+The sum reads `Transaction.savings_id` rather than joining out to `expenses.savings_id`:
+those answer different questions - which fund the money went into, versus which fund the
+lineage feeds now - and only the first is a fact about the past. See the note on the
+Transaction model.
 
 Performance is not a reason to cache this. A decade of heavy use is tens of thousands of
 Transactions for an entire account, and the sum below is filtered by an indexed
@@ -32,32 +36,33 @@ from app.models.expense import Expense
 from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
-
-# Signed contribution of one Transaction to the fund it is stamped with. One CASE so a
-# balance is a single aggregate, rather than three sums subtracted in Python. `INCOME`
-# and `SPEND` fall through to zero: neither touches a fund.
-_FUND_DELTA = case(
-    (Transaction.type == TransactionType.SAVE, Transaction.amount),
-    (Transaction.type == TransactionType.SPEND_SAVED, -Transaction.amount),
-    (Transaction.type == TransactionType.TRANSFER, -Transaction.amount),
-    else_=Decimal(0),
-)
+from app.services.visibility import live_transactions
 
 
 async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
     """What the savings fund holds right now.
 
-    Deliberately *not* built on `live_transactions`, which makes this the one read in
-    the codebase that departs from it. That select applies the ancestor rule - a
-    Transaction is hidden when its Expense or Budget is soft-deleted - which is right
-    for listing what a user can see and wrong for counting money. A fund whose lineage
-    was deleted still holds real money, and reporting zero would be a silent revaluation
-    rather than a hidden row. A fund ends through its own `is_deleted`; a movement stops
+    Built on `live_transactions`, like every other read. That was briefly impossible:
+    while Transaction was subject to the ancestor rule, a soft-deleted Expense hid its
+    own SAVE rows and the fund quietly read zero, so this had to filter `is_deleted`
+    for itself. ADR-0007 as amended took Transaction out of that rule and the special
+    case went with it - a fund ends through its own `is_deleted`, and a movement stops
     counting through the Transaction's.
     """
-    query = select(func.coalesce(func.sum(_FUND_DELTA), Decimal(0))).where(
-        Transaction.savings_id == savings_id,
-        ~Transaction.is_deleted,
+    visible = live_transactions().subquery()
+    # Signed contribution of each row. One CASE so the balance is a single aggregate
+    # rather than three sums subtracted in Python; `INCOME` and `SPEND` fall through to
+    # zero because neither touches a fund.
+    delta = case(
+        (visible.c.type == TransactionType.SAVE, visible.c.amount),
+        (visible.c.type == TransactionType.SPEND_SAVED, -visible.c.amount),
+        (visible.c.type == TransactionType.TRANSFER, -visible.c.amount),
+        else_=Decimal(0),
+    )
+    query = (
+        select(func.coalesce(func.sum(delta), Decimal(0)))
+        .select_from(visible)
+        .where(visible.c.savings_id == savings_id)
     )
     return Decimal(await db.scalar(query) or 0)
 

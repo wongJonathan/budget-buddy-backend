@@ -16,13 +16,24 @@ Budget is not, because the parent being gone is what "deleted" means for the chi
 
 Category takes no part in this: it hard-deletes, guarded by ON DELETE RESTRICT.
 
-An income Transaction has no Expense at all (docs/adr/0009), so `live_transactions`
-outer-joins rather than joins, and spells out that a null `expense_id` is visible on
-its own account. An inner join here would drop every income row from every list -
-without an error, and without any query in the codebase looking wrong.
+**Transaction takes no part in the ancestor rule.** It applies between Budget and
+Expense only. A Transaction is visible whenever it is not itself deleted, whatever
+happened to the Expense it references.
+
+That is a consequence of ADR-0009 rather than an exception to ADR-0007. The ancestor
+rule was written when a Transaction was "an actual measured against a plan", where
+hiding it along with its plan is coherent. ADR-0009 redefined a Transaction as any
+change to the money available to a User - a fact about money, not about a plan - and a
+record that GBP 300 left the account does not stop being true because the plan it was
+measured against was deleted. Deleting an Expense removes the plan; the ledger stands.
+
+It is also what keeps money correct. Any sum over money - the Pool, a Savings balance -
+counts Transactions, and an ancestor rule would have unspent every Spend under a deleted
+Expense, quietly inflating the Pool by the amount the user had spent. See ADR-0007 as
+amended.
 """
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, select
 
 from app.models.budget import Budget
 from app.models.expense import Expense
@@ -51,24 +62,18 @@ def live_expenses(*, include_deleted: bool = False) -> Select[tuple[Expense]]:
 
 
 def live_transactions(*, include_deleted: bool = False) -> Select[tuple[Transaction]]:
-    """Transactions whose whole chain up to the Budget is intact.
+    """Transactions that haven't been deleted.
 
-    Income has no chain, so it is visible whenever it is not itself deleted. Note the
-    null check cannot be folded into the join condition: with an outer join, a missing
-    Expense leaves `Expense.is_deleted` NULL, and `~NULL` is NULL, which filters the
-    row out exactly as an inner join would have.
+    No join, and deliberately so: a Transaction has no ancestor for visibility purposes.
+    It is a movement of the User's money, and it stays on the record whether or not the
+    Expense it references is still there - see the module docstring for why that changed
+    with ADR-0009, and ADR-0007 as amended.
+
+    This is what a caller wanting "everything about this user's money" gets, which is
+    why the Pool and `savings.balance` can both build on it rather than each writing
+    their own filter and drifting apart.
     """
-    query = (
-        select(Transaction)
-        .outerjoin(Expense, Expense.id == Transaction.expense_id)
-        .outerjoin(Budget, Budget.id == Expense.budget_id)
-        .where(
-            or_(
-                Transaction.expense_id.is_(None),
-                and_(~Expense.is_deleted, ~Budget.is_deleted),
-            )
-        )
-    )
+    query = select(Transaction)
     if not include_deleted:
         query = query.where(~Transaction.is_deleted)
     return query

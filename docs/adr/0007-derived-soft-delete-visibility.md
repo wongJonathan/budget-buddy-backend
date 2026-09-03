@@ -1,8 +1,25 @@
 # Soft-delete visibility is derived from ancestors, not propagated on write
 
-**Status**: accepted
+**Status**: accepted (amended by ADR-0011 — Transaction is no longer subject to the ancestor rule)
 
-Budget, Expense and Transaction all soft-delete via an `is_deleted` flag; their `DELETE` routes set the flag and the rows stay. A row is **visible only if it and every ancestor is undeleted**, evaluated at read time through joins in `app/services/visibility.py`. Soft-deleting a Budget therefore hides its Expenses and their Transactions without writing to a single one of them.
+Budget, Expense, Transaction and Savings all soft-delete via an `is_deleted` flag; their `DELETE` routes set the flag and the rows stay. A row is **visible only if it and every ancestor is undeleted**, evaluated at read time through joins in `app/services/visibility.py`. Soft-deleting a Budget therefore hides its Expenses without writing to a single one of them.
+
+## Amendment: the ancestor rule runs Budget → Expense, and stops there
+
+**A Transaction is visible whenever it is not itself deleted**, whatever happened to the Expense it references. Deleting an Expense removes the plan and leaves the ledger standing.
+
+This ADR was written when a Transaction was "an actual measured against a plan", where hiding one along with its plan is coherent. ADR-0009 then redefined a Transaction as *any change to the money available to a User* — a fact about money, not about a plan — and noted that "an actual against a plan" now describes only the subset with a non-null `expense_id`. This rule was not revisited at the time. A record that £300 left the account does not stop being true because the plan it was measured against was deleted.
+
+It is also what keeps money correct, which is how the omission surfaced. Every sum over money — the Pool, a Savings balance — counts Transactions, and under the original rule deleting an Expense **unspent** every Spend beneath it:
+
+| | Pool over all rows | Pool over *visible* rows |
+| --- | --- | --- |
+| £1000 income, £300 spent on Groceries | £700 | £700 |
+| after deleting the Groceries Expense | £700 | **£1000** |
+
+£300 conjured from nothing. `savings.balance` had already been written to sidestep it by filtering `is_deleted` itself, making it the one read that did not build on `visibility.live_*` — a warning sign treated as a special case rather than as evidence the rule was wrong. With the amendment that special case is gone and `balance` uses `live_transactions` like everything else.
+
+Budget and Expense keep the ancestor rule between themselves: an Expense is a line *within* a plan, so it has no meaning once the plan is gone. Only Transaction outgrew it.
 
 Every read path builds on `live_budgets()` / `live_expenses()` / `live_transactions()`. No service starts from a bare `select()`, and fetch-by-id goes through the same helpers rather than `db.get()`, so a soft-deleted row 404s on a direct link instead of merely vanishing from lists.
 

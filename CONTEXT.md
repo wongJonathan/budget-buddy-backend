@@ -44,7 +44,7 @@ The money a User has available to allocate right now: Income received, less what
 _Avoid_: "balance", "budget" — the Pool is the User's spendable money, not a plan and not a Budget's total.
 
 **Soft delete**:
-Marking a Budget, Expense or Transaction as deleted (`is_deleted`) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses and their Transactions without touching them. Deleted means gone: a soft-deleted row is absent from lists and unreachable by id alike. Category and User are the exceptions — they hard-delete.
+Marking a Budget, Expense, Transaction or Savings as deleted (`is_deleted`) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses without touching them. Transaction is outside this rule — it is visible unless it is itself deleted, because it records a movement of real money rather than a line in a plan, and deleting a plan must not unspend what was spent against it. Deleted means gone: a soft-deleted row is absent from lists and unreachable by id alike. Category and User are the exceptions — they hard-delete.
 _Avoid_: "deactivated" — Expense used to call its flag `is_deactivated`, which reads like a state a user chose rather than a deletion. One word for one concept.
 
 **Period**:

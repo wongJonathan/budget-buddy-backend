@@ -14,9 +14,7 @@ from app.services import transaction as transaction_service
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
-@router.post(
-    "", response_model=list[TransactionRead], status_code=status.HTTP_201_CREATED
-)
+@router.post("", response_model=list[TransactionRead], status_code=status.HTTP_201_CREATED)
 async def create_transaction(
     user: CurrentUser, data: TransactionCreate, db: DbSession
 ) -> list[Transaction]:
