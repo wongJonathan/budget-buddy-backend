@@ -7,13 +7,13 @@ a `GENERATED ALWAYS AS` expression can only see its own row.
 
 What is left is the entity's actual job: **durable lineage identity**. ADR-0010 gives a
 carried Expense a fresh `series_id` and no link back, so nothing else in the schema can
-say "these rows across three Periods are the same real fund". `series_id`
+say "these rows across three Periods are the same real pot of money". `series_id`
 identifies a lineage only until Rollover carries it; `savings_id` outlives that.
 
 Which is why `expenses.savings_id` carries no UNIQUE constraint - many Expense rows, one
 per Period, point at one Savings. A UNIQUE would reject next month's row the first time
 Rollover ran. "One Savings per Expense" is a statement about concepts, held by only ever
-pointing a lineage's rows at the fund they inherited.
+pointing a lineage's rows at the pot they inherited.
 
 See docs/adr/0011.
 """
@@ -28,6 +28,11 @@ from app.database import Base, UUIDPrimaryKeyMixin
 
 
 class Savings(UUIDPrimaryKeyMixin, Base):
+    """
+    Tracks the money saved for an expense.
+    Total is determined by deriving it from all saved and spend saved transactions for a given expense
+    """
+
     __tablename__ = "savings"
 
     # User-scoped rather than Budget-scoped: the money is real, and a Budget is a plan.
