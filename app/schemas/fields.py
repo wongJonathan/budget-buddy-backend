@@ -11,6 +11,11 @@ never be signed into, and nothing anywhere raises - it's just a 401 forever.
 be written into the month that is current now. A row carrying today's real date
 instead still inserts happily and then fails to match `period =` comparisons, the
 `(budget_id, period, series_id)` constraint, and Rollover's exact-match reuse.
+
+`RequestedPeriod`: the same canonical form arriving the other way, as a list route's
+`?period=YYYY-MM`. The reads filter on `period =`, so a query value that is not the
+first of its month matches nothing and returns an empty list rather than an error -
+the same silence as above, reached from the read side.
 """
 
 import datetime
@@ -68,6 +73,19 @@ def _to_current_period(value: datetime.date) -> datetime.date:
     return period
 
 
+def _parse_requested_period(value: object) -> object:
+    # Anything that isn't a string is left for pydantic to reject - a non-str would
+    # otherwise reach strptime() as a TypeError, which is a 500 rather than a 422.
+    if isinstance(value, str):
+        try:
+            return first_of_month(datetime.date.strptime(value, "%Y-%m"))
+        except ValueError:
+            raise ValueError(
+                f"'{value}' must be in YYYY-MM format, e.g. 2026-09"
+            ) from None
+    return value
+
+
 _SERVER_ONLY_TYPES = frozenset({TransactionType.SPEND_SAVED, TransactionType.TRANSFER})
 
 
@@ -88,3 +106,7 @@ ClientTransactionType = Annotated[TransactionType, AfterValidator(_reject_server
 # what draft Budgets are for; backdating would let a late edit change a shortfall
 # Rollover has already acted on. See docs/adr/0010.
 CurrentPeriod = Annotated[datetime.date, AfterValidator(_to_current_period)]
+
+RequestedPeriod = Annotated[
+    datetime.date | None, BeforeValidator(_parse_requested_period)
+]

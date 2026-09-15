@@ -2,7 +2,6 @@ import datetime
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -73,11 +72,6 @@ async def get_expense(
     return result.one_or_none()
 
 
-async def list_expenses(db: AsyncSession, user: User) -> Sequence[Expense]:
-    result = await db.execute(live_expenses().where(Expense.user_id == user.id))
-    return result.scalars().all()
-
-
 async def update_expense(db: AsyncSession, expense: Expense, data: ExpenseUpdate) -> Expense:
     _require_open_period(expense)
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -107,8 +101,7 @@ async def list_budget_expenses(
 ) -> Sequence[Expense]:
     query = live_expenses(include_deleted=include_deleted).where(
         Expense.budget_id == budget_id,
-        extract("year", Expense.period) == period.year,
-        extract("month", Expense.period) == period.month,
+        Expense.period == period,
     )
     result = await db.execute(query)
 

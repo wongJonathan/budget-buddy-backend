@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(budgets.router)
     app.include_router(categories.router)
     app.include_router(expenses.router)
+    app.include_router(expenses.budget_expenses_router)
     app.include_router(transactions.router)
 
     return app

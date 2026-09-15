@@ -91,6 +91,18 @@ async def delete_budget(db: AsyncSession, user: User, budget: Budget) -> None:
     await budget_service.soft_delete_budget(db, budget, user)
 
 
+async def visible_expenses(db: AsyncSession, budget: Budget) -> Sequence[Expense]:
+    """What a client listing this Budget's open Period would get back.
+
+    Stands in for the user-wide `list_expenses`, which went away with the unbounded
+    `GET /expenses`. The rule under test is unchanged - `live_expenses` - but it is
+    now reached through the read path that actually ships.
+    """
+    return await expense_service.list_budget_expenses(
+        db, budget.id, current_period(), include_deleted=False
+    )
+
+
 # ---------------------------------------------------------------------------
 # visibility is derived from ancestors
 # ---------------------------------------------------------------------------
@@ -98,10 +110,10 @@ async def delete_budget(db: AsyncSession, user: User, budget: Budget) -> None:
 
 async def test_a_seeded_chain_is_visible_to_start_with(db_session: AsyncSession) -> None:
     """The control: without it, every test below could pass by returning nothing."""
-    user, _, _, _ = await seed_chain(db_session)
+    user, budget, _, _ = await seed_chain(db_session)
 
     assert len(await budget_service.list_budgets(db_session)) == 1
-    assert len(await expense_service.list_expenses(db_session, user)) == 1
+    assert len(await visible_expenses(db_session, budget)) == 1
     assert len(await transaction_service.list_transactions(db_session, user)) == 1
 
 
@@ -120,7 +132,7 @@ async def test_soft_deleting_a_budget_hides_its_expenses_but_not_its_transaction
     await delete_budget(db_session, user, budget)
 
     assert await budget_service.list_budgets(db_session) == []
-    assert await expense_service.list_expenses(db_session, user) == []
+    assert await visible_expenses(db_session, budget) == []
     visible = await transaction_service.list_transactions(db_session, user)
     assert [t.id for t in visible] == [transaction.id]
 
@@ -140,11 +152,11 @@ async def test_soft_deleting_an_expense_leaves_its_transactions_on_the_record(
 ) -> None:
     """Deleting the plan removes the plan. The GBP 5 still left the account, and a sum
     over money that dropped it would quietly hand the User their spending back."""
-    user, _, expense, transaction = await seed_chain(db_session)
+    user, budget, expense, transaction = await seed_chain(db_session)
 
     await expense_service.soft_delete_expense(db_session, expense)
 
-    assert await expense_service.list_expenses(db_session, user) == []
+    assert await visible_expenses(db_session, budget) == []
     visible = await transaction_service.list_transactions(db_session, user)
     assert [t.id for t in visible] == [transaction.id]
 
@@ -153,12 +165,12 @@ async def test_soft_deleting_a_transaction_leaves_its_parents_alone(
     db_session: AsyncSession,
 ) -> None:
     """Visibility only ever flows downward."""
-    user, _, _, transaction = await seed_chain(db_session)
+    user, budget, _, transaction = await seed_chain(db_session)
 
     await transaction_service.soft_delete_transaction(db_session, transaction)
 
     assert await transaction_service.list_transactions(db_session, user) == []
-    assert len(await expense_service.list_expenses(db_session, user)) == 1
+    assert len(await visible_expenses(db_session, budget)) == 1
     assert len(await budget_service.list_budgets(db_session)) == 1
 
 
@@ -204,12 +216,12 @@ async def test_an_expense_under_a_deleted_budget_is_unreachable_by_id(
 async def test_include_deleted_surfaces_deleted_expenses_of_a_live_budget(
     db_session: AsyncSession,
 ) -> None:
-    """Backs GET /budgets/{id}?include_deleted=true."""
+    """Backs GET /budgets/{id}/expenses?include_deleted=true."""
     _, budget, expense, _ = await seed_chain(db_session)
     await expense_service.soft_delete_expense(db_session, expense)
 
     visible = await expense_service.list_budget_expenses(
-        db_session, budget.id, datetime.date.today(), include_deleted=True
+        db_session, budget.id, current_period(), include_deleted=True
     )
 
     assert [e.id for e in visible] == [expense.id]
@@ -224,7 +236,7 @@ async def test_include_deleted_never_surfaces_children_of_a_deleted_budget(
     await delete_budget(db_session, user, budget)
 
     visible = await expense_service.list_budget_expenses(
-        db_session, budget.id, datetime.date.today(), include_deleted=True
+        db_session, budget.id, current_period(), include_deleted=True
     )
 
     assert visible == []

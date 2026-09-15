@@ -1,4 +1,3 @@
-import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, status
@@ -7,13 +6,10 @@ from app.dependencies import CurrentUser, DbSession, OwnedBudget
 from app.models.budget import Budget
 from app.schemas.budget import (
     BudgetCreate,
-    BudgetExpensesRead,
     BudgetRead,
     BudgetUpdate,
 )
-from app.schemas.expense import ExpenseRead
 from app.services import budget as budget_service
-from app.services.expense import list_budget_expenses
 
 router = APIRouter(prefix="/budgets", tags=["budgets"])
 
@@ -23,32 +19,11 @@ async def create_budget(data: BudgetCreate, user: CurrentUser, db: DbSession) ->
     return await budget_service.create_budget(db, user, data)
 
 
-@router.get("/{budget_id}", response_model=BudgetExpensesRead)
+@router.get("/{budget_id}", response_model=BudgetRead)
 async def get_budget(
     budget: OwnedBudget,
-    db: DbSession,
-    period: str | None = None,
-    include_deleted: bool = False,
-) -> BudgetExpensesRead:
-    try:
-        period_date = (
-            datetime.date.strptime(period, "%Y-%m") if period else datetime.date.today()
-        )
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{period} not right format. Must be in YYYY-MM format",
-        ) from ValueError
-
-    expenses_sequence = await list_budget_expenses(
-        db, budget.id, period_date, include_deleted
-    )
-    expenses = [ExpenseRead.model_validate(expense) for expense in expenses_sequence]
-
-    return BudgetExpensesRead(
-        **BudgetRead.model_validate(budget).model_dump(),
-        expenses=expenses,
-    )
+) -> Budget:
+    return budget
 
 
 @router.post(
@@ -67,15 +42,11 @@ async def json_convert_budget(
         budget = await budget_service.convert_json_to_budget(db, metadata, file, user)
         return budget
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @router.patch("/{budget_id}", response_model=BudgetRead)
-async def update_budget(
-    budget: OwnedBudget, data: BudgetUpdate, db: DbSession
-) -> Budget:
+async def update_budget(budget: OwnedBudget, data: BudgetUpdate, db: DbSession) -> Budget:
     return await budget_service.update_budget(db, budget, data)
 
 

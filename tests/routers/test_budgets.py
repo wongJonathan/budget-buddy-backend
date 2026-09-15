@@ -6,17 +6,16 @@ behind `POST /budgets/json-convert-budget` is tested in
 tests/services/test_budget.py.
 """
 
-import datetime
 import json
 import uuid
 from collections.abc import Callable
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
 
 from app.models.user import User
-from tests.factories import make_budget, make_expense, make_scalars_one
+from tests.factories import make_budget, make_scalars_one
 
 # ---------------------------------------------------------------------------
 # Router: create / read / update / delete
@@ -81,7 +80,7 @@ async def test_delete_budget_not_found(authed_client: AsyncClient, mock_db: Magi
 
 
 # ---------------------------------------------------------------------------
-# Router: GET /budgets/{id} (period + include_deleted)
+# Router: GET /budgets/{id}
 # ---------------------------------------------------------------------------
 
 
@@ -93,84 +92,23 @@ async def test_get_budget_not_found(authed_client: AsyncClient, mock_db: MagicMo
     assert response.status_code == 404
 
 
-async def test_get_budget_invalid_period_format(
+async def test_get_budget_returns_the_budget_alone(
     authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
-    budget = make_budget()
-    mock_db.scalars.return_value = make_scalars_one(budget)
-
-    response = await authed_client.get(f"/budgets/{budget.id}?period=not-a-period")
-
-    assert response.status_code == 400
-
-
-async def test_get_budget_with_expenses(
-    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
-) -> None:
+    """No `expenses` key any more: the Expenses of a Period are their own collection
+    at `GET /budgets/{id}/expenses`, so this stays the small, near-static resource."""
     budget = make_budget(name="Groceries Budget")
     mock_db.scalars.return_value = make_scalars_one(budget)
-    mock_db.execute.return_value = make_scalars_result(
-        [make_expense(name="Milk"), make_expense(name="Bread")]
-    )
 
     response = await authed_client.get(f"/budgets/{budget.id}")
 
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "Groceries Budget"
-    assert {e["name"] for e in body["expenses"]} == {"Milk", "Bread"}
-
-
-async def test_get_budget_no_expenses_this_period_is_200_not_404(
-    authed_client: AsyncClient, mock_db: MagicMock, make_scalars_result: Callable[..., MagicMock]
-) -> None:
-    """A budget with nothing planned for the resolved period is a legitimate empty
-    state, not a 404 — 404 stays reserved for 'budget doesn't exist'."""
-    budget = make_budget()
-    mock_db.scalars.return_value = make_scalars_one(budget)
-    mock_db.execute.return_value = make_scalars_result([])
-
-    response = await authed_client.get(f"/budgets/{budget.id}")
-
-    assert response.status_code == 200
-    assert response.json()["expenses"] == []
-
-
-async def test_get_budget_default_period_is_today(
-    authed_client: AsyncClient, mock_db: MagicMock
-) -> None:
-    budget = make_budget()
-    mock_db.scalars.return_value = make_scalars_one(budget)
-
-    with patch(
-        "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])
-    ) as mock_list_expenses:
-        response = await authed_client.get(f"/budgets/{budget.id}")
-
-    assert response.status_code == 200
-    _, called_budget_id, called_period, called_include_deleted = mock_list_expenses.call_args.args
-    assert called_budget_id == budget.id
-    assert called_period == datetime.date.today()
-    assert called_include_deleted is False
-
-
-async def test_get_budget_explicit_period_and_include_deleted(
-    authed_client: AsyncClient, mock_db: MagicMock
-) -> None:
-    budget = make_budget()
-    mock_db.scalars.return_value = make_scalars_one(budget)
-
-    with patch(
-        "app.routers.budgets.list_budget_expenses", new=AsyncMock(return_value=[])
-    ) as mock_list_expenses:
-        response = await authed_client.get(
-            f"/budgets/{budget.id}?period=2026-03&include_deleted=true"
-        )
-
-    assert response.status_code == 200
-    _, _, called_period, called_include_deleted = mock_list_expenses.call_args.args
-    assert called_period == datetime.date(2026, 3, 1)
-    assert called_include_deleted is True
+    assert body["id"] == str(budget.id)
+    assert "expenses" not in body
+    # The budget row is the only read - nothing goes looking for Expenses.
+    mock_db.execute.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

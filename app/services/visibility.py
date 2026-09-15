@@ -11,7 +11,7 @@ the rule can't drift between query and query. A service needing extra filtering 
 
 `include_deleted=True` relaxes the row's *own* flag only - never an ancestor's. Asking
 for the deleted Expenses of a live Budget is a real feature (it backs
-`GET /budgets/{id}?include_deleted=true`); surfacing anything belonging to a deleted
+`GET /budgets/{id}/expenses?include_deleted=true`); surfacing anything belonging to a deleted
 Budget is not, because the parent being gone is what "deleted" means for the child.
 
 Category takes no part in this: it hard-deletes, guarded by ON DELETE RESTRICT.
