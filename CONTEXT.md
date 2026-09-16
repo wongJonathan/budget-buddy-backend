@@ -50,6 +50,10 @@ _Avoid_: "deactivated" — Expense used to call its flag `is_deactivated`, which
 **Period**:
 The real DATE marking which month an Expense instance belongs to, always the first day of that month. Drives Rollover; not a display string like "MM/YYYY". Expenses can only be created, edited or deleted in the current Period — neither ahead nor behind. Earlier Periods are a record, not a working area.
 
+**Monthly Cost**:
+What one Period of an Expense costs, derived from its `cost` and `frequency` and always expressed per month — `cost` is the figure the user typed, Monthly Cost is what a Period is measured against. Daily and weekly plans convert using the actual number of days in the Period's own month, so the same unchanged plan costs less in February than in March. See `docs/adr/0012`.
+_Avoid_: reading it as a fixed property of the plan — it is a property of the plan *in a given Period*, which is why month-over-month comparisons have to normalise per day before they mean anything.
+
 **Met**:
 An Expense whose *Pool-drawing* Transactions for its Period total at least its `monthly_cost` — Save and Spend count, Spend Saved and Transfer do not, because that money was counted when it was saved. Measured against `monthly_cost` for every frequency: `cost` is the figure the user typed, `monthly_cost` is what a Period is measured against.
 _Avoid_: reading Met as "money was spent on it" — it means a Period's allocation was drawn from the Pool, whether that was spent or set aside.
