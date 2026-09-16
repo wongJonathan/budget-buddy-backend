@@ -91,6 +91,24 @@ async def delete_budget(db: AsyncSession, user: User, budget: Budget) -> None:
     await budget_service.soft_delete_budget(db, budget, user)
 
 
+async def visible_transactions(db: AsyncSession, user: User) -> Sequence[Transaction]:
+    """Every Transaction of the User's that the visibility rule lets through.
+
+    The window is deliberately wider than any date the seeds use, and the page larger
+    than anything they create. These tests are about what soft-delete hides; a date
+    filter or a page boundary narrowing the result would make a passing assertion
+    ambiguous between 'hidden' and 'out of range'."""
+    rows, _ = await transaction_service.list_transactions(
+        db,
+        user,
+        date_from=datetime.date(2000, 1, 1),
+        date_to=datetime.date(2100, 1, 1),
+        limit=500,
+        offset=0,
+    )
+    return rows
+
+
 async def visible_expenses(db: AsyncSession, budget: Budget) -> Sequence[Expense]:
     """What a client listing this Budget's open Period would get back.
 
@@ -114,7 +132,7 @@ async def test_a_seeded_chain_is_visible_to_start_with(db_session: AsyncSession)
 
     assert len(await budget_service.list_budgets(db_session)) == 1
     assert len(await visible_expenses(db_session, budget)) == 1
-    assert len(await transaction_service.list_transactions(db_session, user)) == 1
+    assert len(await visible_transactions(db_session, user)) == 1
 
 
 async def test_soft_deleting_a_budget_hides_its_expenses_but_not_its_transactions(
@@ -133,7 +151,7 @@ async def test_soft_deleting_a_budget_hides_its_expenses_but_not_its_transaction
 
     assert await budget_service.list_budgets(db_session) == []
     assert await visible_expenses(db_session, budget) == []
-    visible = await transaction_service.list_transactions(db_session, user)
+    visible = await visible_transactions(db_session, user)
     assert [t.id for t in visible] == [transaction.id]
 
 
@@ -157,7 +175,7 @@ async def test_soft_deleting_an_expense_leaves_its_transactions_on_the_record(
     await expense_service.soft_delete_expense(db_session, expense)
 
     assert await visible_expenses(db_session, budget) == []
-    visible = await transaction_service.list_transactions(db_session, user)
+    visible = await visible_transactions(db_session, user)
     assert [t.id for t in visible] == [transaction.id]
 
 
@@ -169,7 +187,7 @@ async def test_soft_deleting_a_transaction_leaves_its_parents_alone(
 
     await transaction_service.soft_delete_transaction(db_session, transaction)
 
-    assert await transaction_service.list_transactions(db_session, user) == []
+    assert await visible_transactions(db_session, user) == []
     assert len(await visible_expenses(db_session, budget)) == 1
     assert len(await budget_service.list_budgets(db_session)) == 1
 
@@ -331,7 +349,7 @@ async def test_income_with_no_expense_is_visible(db_session: AsyncSession) -> No
     user, _, _, spend = await seed_chain(db_session)
     income = await _income(db_session, user)
 
-    visible = await transaction_service.list_transactions(db_session, user)
+    visible = await visible_transactions(db_session, user)
 
     assert {t.id for t in visible} == {spend.id, income.id}
 
@@ -347,7 +365,7 @@ async def test_income_survives_deleting_the_budget(db_session: AsyncSession) -> 
     income = await _income(db_session, user)
 
     await delete_budget(db_session, user, budget)
-    visible = await transaction_service.list_transactions(db_session, user)
+    visible = await visible_transactions(db_session, user)
 
     assert {t.id for t in visible} == {income.id, spend.id}
 
@@ -358,7 +376,7 @@ async def test_income_is_hidden_once_it_is_itself_deleted(db_session: AsyncSessi
     income = await _income(db_session, user)
 
     await transaction_service.soft_delete_transaction(db_session, income)
-    visible = await transaction_service.list_transactions(db_session, user)
+    visible = await visible_transactions(db_session, user)
 
     assert income.id not in {t.id for t in visible}
 
@@ -378,10 +396,8 @@ async def test_income_belongs_to_its_owner_only(db_session: AsyncSession) -> Non
     await _income(db_session, alice)
     bob, _, _, _ = await seed_chain(db_session)
 
-    assert await transaction_service.list_transactions(db_session, bob) != []
-    assert all(
-        t.user_id == bob.id for t in await transaction_service.list_transactions(db_session, bob)
-    )
+    assert await visible_transactions(db_session, bob) != []
+    assert all(t.user_id == bob.id for t in await visible_transactions(db_session, bob))
 
 
 # ---------------------------------------------------------------------------
@@ -421,9 +437,9 @@ async def test_deleting_an_expense_does_not_unspend_its_transactions(
                 total += row.amount
         return total
 
-    before = pool(await transaction_service.list_transactions(db_session, user))
+    before = pool(await visible_transactions(db_session, user))
     await expense_service.soft_delete_expense(db_session, expense)
-    after = pool(await transaction_service.list_transactions(db_session, user))
+    after = pool(await visible_transactions(db_session, user))
 
     assert before == Decimal("995.00")
     assert after == before
@@ -435,4 +451,4 @@ async def test_a_deleted_transaction_is_still_hidden(db_session: AsyncSession) -
 
     await transaction_service.soft_delete_transaction(db_session, transaction)
 
-    assert await transaction_service.list_transactions(db_session, user) == []
+    assert await visible_transactions(db_session, user) == []

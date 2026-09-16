@@ -62,3 +62,10 @@ class TransactionRead(BaseModel):
     date: datetime.date
     transfer_id: uuid.UUID | None
     is_deleted: bool
+
+
+class TransactionPage(BaseModel):
+    items: list[TransactionRead]
+    total: int
+    limit: int
+    offset: int

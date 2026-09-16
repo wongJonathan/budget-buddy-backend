@@ -13,12 +13,15 @@ the "one purchase" they came from is a UI concept rather than a ledger one - the
 reasoning that makes Income a bare Transaction. See docs/adr/0011.
 """
 
+import datetime
 import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import AppError
 from app.models.enums import TransactionType
 from app.models.expense import Expense
 from app.models.transaction import Transaction
@@ -47,7 +50,9 @@ async def create_transaction(
     if expense is not None and data.type is TransactionType.SAVE:
         # A fund exists because money went into it, never because an Expense was created.
         savings = await savings_service.open_savings(db, expense, user)
-        rows = [Transaction(**data.model_dump(), user_id=user.id, savings_id=savings.id)]
+        rows = [
+            Transaction(**data.model_dump(), user_id=user.id, savings_id=savings.id)
+        ]
     elif expense is not None and data.type is TransactionType.SPEND:
         rows = await _split_spend(db, user, data, expense)
     else:
@@ -97,17 +102,57 @@ async def get_transaction(
     db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
 ) -> Transaction | None:
     result = await db.scalars(
-        live_transactions().where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        live_transactions().where(
+            Transaction.id == transaction_id, Transaction.user_id == user_id
+        )
     )
     return result.one_or_none()
+
+
+class InvalidDateRange(AppError):
+    """A listing asked for a window that ends before it starts.
+
+    422 rather than an empty page: the query is well-formed but cannot match
+    anything, and returning [] would be indistinguishable from a user with no
+    Transactions in a real window."""
+
+    def __init__(self, date_from: datetime.date, date_to: datetime.date) -> None:
+        super().__init__(
+            f"date_from ({date_from.isoformat()}) is after date_to "
+            f"({date_to.isoformat()}); the range would match nothing",
+            status_code=422,
+        )
 
 
 async def list_transactions(
     db: AsyncSession,
     user: User,
-) -> Sequence[Transaction]:
-    result = await db.execute(live_transactions().where(Transaction.user_id == user.id))
-    return result.scalars().all()
+    date_from: datetime.date,
+    date_to: datetime.date,
+    limit: int,
+    offset: int,
+) -> tuple[Sequence[Transaction], int]:
+    if date_from > date_to:
+        raise InvalidDateRange(date_from, date_to)
+
+    window = live_transactions().where(
+        Transaction.user_id == user.id,
+        Transaction.date >= date_from,
+        Transaction.date <= date_to,
+    )
+
+    total = await db.scalar(select(func.count()).select_from(window.subquery()))
+
+    # `id` breaks ties so a row cannot appear on two pages, or on neither: several
+    # Transactions a day is ordinary, and `date` alone leaves their order to the
+    # planner, which is free to answer differently for offset 0 and offset 50.
+    page = await db.execute(
+        window.order_by(Transaction.date.desc(), Transaction.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    return page.scalars().all(), total or 0
 
 
 async def update_transaction(

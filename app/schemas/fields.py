@@ -18,6 +18,7 @@ first of its month matches nothing and returns an empty list rather than an erro
 the same silence as above, reached from the read side.
 """
 
+import calendar
 import datetime
 from typing import Annotated
 
@@ -45,6 +46,11 @@ NormalizedEmail = Annotated[EmailStr, BeforeValidator(_normalize_if_str)]
 def first_of_month(value: datetime.date) -> datetime.date:
     """The canonical Period form: the month `value` falls in, day 1."""
     return value.replace(day=1)
+
+
+def last_of_month(value: datetime.date) -> datetime.date:
+    _, days = calendar.monthrange(value.year, value.month)
+    return value.replace(day=days)
 
 
 def current_period() -> datetime.date:

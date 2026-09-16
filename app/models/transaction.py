@@ -2,7 +2,7 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric
+from sqlalchemy import Date, ForeignKey, Index, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,7 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
     """Any change to the money available to a User - in, out, or between Pool and fund."""
 
     __tablename__ = "transactions"
+    __table_args__ = (Index("ix_transactions_user_date", "user_id", "date"),)
 
     # Null expense_id indicates that it's income
     expense_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -37,12 +38,12 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
         default=None,
         index=True,
     )
-    type: Mapped[TransactionType] = mapped_column(pg_enum(TransactionType, "transaction_type"))
+    type: Mapped[TransactionType] = mapped_column(
+        pg_enum(TransactionType, "transaction_type")
+    )
     name: Mapped[str] = mapped_column()
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
-    # `datetime` module (not `from datetime import date`) avoids this field's own
-    # name shadowing the type in PEP 649 deferred annotation evaluation.
     date: Mapped[datetime.date] = mapped_column(Date)
     is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")
     transfer_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -51,5 +52,5 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
         default=None,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
     )
