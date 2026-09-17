@@ -187,3 +187,86 @@ async def test_an_empty_window_is_an_empty_page_not_an_error(db_session: AsyncSe
 
     assert rows == []
     assert total == 0
+
+
+# ---------------------------------------------------------------------------
+# the ordering contract: date, then created_at, then id (docs/adr/0013)
+# ---------------------------------------------------------------------------
+
+
+async def test_created_at_breaks_a_tie_between_rows_on_the_same_date(
+    db_session: AsyncSession,
+) -> None:
+    """Two purchases the same day come back newest-entered first.
+
+    Each is committed separately so they get distinct `created_at` values - `now()` is
+    transaction-start time, so rows sharing a transaction share it. `id` cannot answer
+    this: it is a v4 UUID, stable but shuffled, which is the whole reason this column
+    exists."""
+    user = await _user(db_session)
+    await _income(db_session, user, MARCH, "1.00")
+    await db_session.commit()
+    await _income(db_session, user, MARCH, "2.00")
+    await db_session.commit()
+
+    rows, _ = await _page(db_session, user)
+
+    assert [row.amount for row in rows] == [Decimal("2.00"), Decimal("1.00")]
+    assert rows[0].created_at > rows[1].created_at
+
+
+async def test_rows_sharing_a_date_and_a_created_at_still_order_repeatably(
+    db_session: AsyncSession,
+) -> None:
+    """The case `id` is still in the sort for.
+
+    Written in one transaction, so `now()` gives them an identical `created_at` - the
+    shape the spend split produces, where a SPEND_SAVED and its SPEND come from one
+    payload and one commit. Neither of the first two keys separates them, so the order
+    is arbitrary; what it must not be is *different* between two runs of the same
+    query, which is what would let a row show up on two pages."""
+    user = await _user(db_session)
+    for amount in ("1.00", "2.00", "3.00", "4.00"):
+        await _income(db_session, user, MARCH, amount)
+    await db_session.commit()
+
+    first_run, _ = await _page(db_session, user)
+    second_run, _ = await _page(db_session, user)
+
+    assert len({row.created_at for row in first_run}) == 1
+    assert [row.id for row in first_run] == [row.id for row in second_run]
+
+
+async def test_paging_across_an_identical_created_at_repeats_nothing(
+    db_session: AsyncSession,
+) -> None:
+    """And the repeatable order has to hold across a page boundary, not just within one."""
+    user = await _user(db_session)
+    for amount in ("1.00", "2.00", "3.00", "4.00"):
+        await _income(db_session, user, MARCH, amount)
+    await db_session.commit()
+
+    first, total = await _page(db_session, user, limit=2, offset=0)
+    second, _ = await _page(db_session, user, limit=2, offset=2)
+
+    assert total == 4
+    assert len({row.id for row in first + second}) == 4
+
+
+async def test_date_outranks_created_at(db_session: AsyncSession) -> None:
+    """A backdated row entered last sorts by its date, not by its arrival.
+
+    This is what keeps the listing a statement about the User's money rather than about
+    the write log - and `date` is editable, so an ordering led by `created_at` would
+    make correcting a date appear to do nothing."""
+    user = await _user(db_session)
+    await _income(db_session, user, MARCH.replace(day=20), "1.00")
+    await db_session.commit()
+    await _income(db_session, user, MARCH.replace(day=5), "2.00")
+    await db_session.commit()
+
+    rows, _ = await _page(db_session, user)
+
+    # Entered second, dated earlier - so it comes last despite the newer created_at.
+    assert [row.date.day for row in rows] == [20, 5]
+    assert rows[1].created_at > rows[0].created_at

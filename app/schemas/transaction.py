@@ -60,6 +60,7 @@ class TransactionRead(BaseModel):
     amount: Decimal
     note: str | None
     date: datetime.date
+    created_at: datetime.datetime
     transfer_id: uuid.UUID | None
     is_deleted: bool
 

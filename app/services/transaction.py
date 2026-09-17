@@ -143,11 +143,12 @@ async def list_transactions(
 
     total = await db.scalar(select(func.count()).select_from(window.subquery()))
 
-    # `id` breaks ties so a row cannot appear on two pages, or on neither: several
-    # Transactions a day is ordinary, and `date` alone leaves their order to the
-    # planner, which is free to answer differently for offset 0 and offset 50.
     page = await db.execute(
-        window.order_by(Transaction.date.desc(), Transaction.id.desc())
+        window.order_by(
+            Transaction.date.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
         .limit(limit)
         .offset(offset)
     )

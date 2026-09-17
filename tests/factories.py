@@ -118,6 +118,9 @@ def make_transaction(**overrides: Any) -> Transaction:
         "amount": Decimal("10.00"),
         "note": None,
         "date": datetime.date.today(),
+        # Server-set in reality (`now()`), so this is a plausible fake like the ids and
+        # timestamps above - see the module docstring.
+        "created_at": datetime.datetime.now(datetime.UTC),
         "transfer_id": None,
         "is_deleted": False,
         "user_id": uuid.uuid4(),

@@ -58,6 +58,8 @@ def _fake_refresh(obj: object) -> None:
     elif isinstance(obj, Transaction | Savings):
         if obj.is_deleted is None:
             obj.is_deleted = False
+        if isinstance(obj, Transaction) and obj.created_at is None:
+            obj.created_at = datetime.datetime.now(datetime.UTC)
     elif isinstance(obj, Category):
         pass  # no server-generated fields besides id
 
@@ -130,9 +132,7 @@ def current_user() -> User:
 
 
 @pytest.fixture
-async def authed_client(
-    mock_db: MagicMock, current_user: User
-) -> AsyncGenerator[AsyncClient]:
+async def authed_client(mock_db: MagicMock, current_user: User) -> AsyncGenerator[AsyncClient]:
     """A client whose requests arrive already authenticated as `current_user`.
 
     Overrides `get_current_user` rather than planting a session cookie: resolving a

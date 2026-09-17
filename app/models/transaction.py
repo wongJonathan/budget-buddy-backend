@@ -2,7 +2,7 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric
+from sqlalchemy import Date, ForeignKey, Index, Numeric, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,7 +14,9 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
     """Any change to the money available to a User - in, out, or between Pool and fund."""
 
     __tablename__ = "transactions"
-    __table_args__ = (Index("ix_transactions_user_date", "user_id", "date"),)
+    __table_args__ = (
+        Index("ix_transactions_user_date_created", "user_id", "date", "created_at"),
+    )
 
     # Null expense_id indicates that it's income
     expense_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -45,6 +47,7 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
     date: Mapped[datetime.date] = mapped_column(Date)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
     is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")
     transfer_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
