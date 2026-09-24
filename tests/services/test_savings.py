@@ -357,11 +357,54 @@ async def _transactions(db: AsyncSession, user: User) -> list[Transaction]:
     return list(result.all())
 
 
+def _live_pool(rows: list[Transaction]) -> Decimal:
+    """The Pool over undeleted rows: INCOME - SAVE - SPEND + Pool-side TRANSFER."""
+    total = Decimal(0)
+    for t in rows:
+        if t.deleted_at is not None:
+            continue
+        if t.type is TransactionType.INCOME:
+            total += t.amount
+        elif t.type in (TransactionType.SAVE, TransactionType.SPEND):
+            total -= t.amount
+        elif t.type is TransactionType.TRANSFER and t.expense_id is None:
+            total += t.amount
+    return total
+
+
+async def _fund_from_last_period(
+    db: AsyncSession, user: User, expense: Expense, amount: str
+) -> None:
+    """Give `expense`'s lineage a fund holding `amount` saved in the previous Period.
+
+    Deleting an Expense withdraws its own Period's Saves (docs/adr/0014), so only money
+    from earlier Periods is left for the drain to move. A test about the drain needs
+    that money to exist, or it passes by transferring nothing.
+    """
+    await db.refresh(expense)
+    previous = Expense(
+        budget_id=expense.budget_id,
+        category_id=expense.category_id,
+        user_id=user.id,
+        name=expense.name,
+        cost=expense.cost,
+        frequency=expense.frequency,
+        period=(expense.period - datetime.timedelta(days=1)).replace(day=1),
+        series_id=expense.series_id,
+    )
+    db.add(previous)
+    await db.commit()
+    await _post(db, user, previous, TransactionType.SAVE, amount)
+    await db.refresh(previous)
+    expense.savings_id = previous.savings_id
+    await db.commit()
+
+
 async def test_deleting_the_live_expense_drains_the_fund(db_session: AsyncSession) -> None:
     """Money set aside for a plan that no longer exists belongs back in the Pool, not
     stranded behind a deleted row."""
     user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
+    await _fund_from_last_period(db_session, user, expense, "100.00")
 
     await expense_service.soft_delete_expense(db_session, expense)
 
@@ -373,7 +416,7 @@ async def test_the_drain_is_a_transfer_pair(db_session: AsyncSession) -> None:
     Direction is readable off `expense_id`/`savings_id`, so the link carries no meaning
     beyond pairing them."""
     user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
+    await _fund_from_last_period(db_session, user, expense, "100.00")
     savings_id = expense.savings_id
 
     await expense_service.soft_delete_expense(db_session, expense)
@@ -397,7 +440,7 @@ async def test_the_drain_is_not_income(db_session: AsyncSession) -> None:
     """The tempting shortcut, and wrong: income asserts money arrived from outside, and
     nothing arrived. It would put the account above the bank by the fund's value."""
     user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
+    await _fund_from_last_period(db_session, user, expense, "100.00")
 
     await expense_service.soft_delete_expense(db_session, expense)
 
@@ -453,7 +496,7 @@ async def test_deleting_an_expense_with_no_fund_writes_nothing(
 async def test_a_closed_fund_is_not_drained_twice(db_session: AsyncSession) -> None:
     """Idempotent through the `deleted_at` check. A second drain would invent money."""
     user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
+    await _fund_from_last_period(db_session, user, expense, "100.00")
     await expense_service.soft_delete_expense(db_session, expense)
 
     await savings_service.close_savings(db_session, expense)
@@ -470,26 +513,70 @@ async def test_the_drain_conserves_money(db_session: AsyncSession) -> None:
     exactly what the fund gives up, and Met is untouched because transfers never count.
     """
     user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.INCOME, "500.00")
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
+    await _post(db_session, user, None, TransactionType.INCOME, "500.00")
+    await _fund_from_last_period(db_session, user, expense, "100.00")
 
-    def pool(rows: list[Transaction]) -> Decimal:
-        total = Decimal(0)
-        for t in rows:
-            if t.type is TransactionType.INCOME:
-                total += t.amount
-            elif t.type in (TransactionType.SAVE, TransactionType.SPEND):
-                total -= t.amount
-            elif t.type is TransactionType.TRANSFER and t.expense_id is None:
-                total += t.amount
-        return total
-
-    before = pool(await _transactions(db_session, user)) + await savings_service.balance(
+    before = _live_pool(await _transactions(db_session, user)) + await savings_service.balance(
         db_session, expense.savings_id
     )
     await expense_service.soft_delete_expense(db_session, expense)
-    after = pool(await _transactions(db_session, user)) + await savings_service.balance(
+    after = _live_pool(await _transactions(db_session, user)) + await savings_service.balance(
         db_session, expense.savings_id
     )
 
     assert before == after == Decimal("500.00")
+
+
+# ---------------------------------------------------------------------------
+# withdraw before drain (docs/adr/0014)
+# ---------------------------------------------------------------------------
+# Deleting an Expense withdraws its Transactions *and then* drains the fund. The
+# other order double-counts: the drain reads a balance that still includes this
+# Period's Saves and returns them to the Pool as a Transfer, and the withdrawal then
+# returns them again. It also withdraws the fund side of the Transfer it just wrote
+# (that row carries the Expense's `expense_id`), stranding the Pool side on its own.
+
+
+async def test_a_save_from_this_period_is_withdrawn_not_drained(
+    db_session: AsyncSession,
+) -> None:
+    """The fund holds only this Period's money, so withdrawing the Save empties it and
+    there is nothing left to Transfer. The Pool ends exactly where it was before the
+    Save, not above it."""
+    user, expense = await _expense(db_session)
+    pool_before_save = _live_pool(await _transactions(db_session, user))
+    await _post(db_session, user, expense, TransactionType.SAVE, "50.00")
+
+    await expense_service.soft_delete_expense(db_session, expense)
+
+    rows = await _transactions(db_session, user)
+    assert not [t for t in rows if t.type is TransactionType.TRANSFER]
+    assert _live_pool(rows) == pool_before_save
+    assert await savings_service.balance(db_session, expense.savings_id) == Decimal(0)
+
+
+async def test_only_money_from_earlier_periods_is_drained(db_session: AsyncSession) -> None:
+    """Earlier Periods' Saves stay on the record and leave the fund as a Transfer; this
+    Period's Save is withdrawn. Both halves of the Transfer survive the delete - the
+    withdrawal must not catch the fund side it wrote."""
+    user, expense = await _expense(db_session)
+    await _fund_from_last_period(db_session, user, expense, "100.00")
+    await _post(db_session, user, expense, TransactionType.SAVE, "30.00")
+
+    rows = await _transactions(db_session, user)
+    held_before = await savings_service.balance(db_session, expense.savings_id)
+    total_before = _live_pool(rows) + held_before
+    assert held_before == Decimal("130.00")
+
+    await expense_service.soft_delete_expense(db_session, expense)
+
+    rows = await _transactions(db_session, user)
+    transfers = [t for t in rows if t.type is TransactionType.TRANSFER]
+    assert len(transfers) == 2
+    assert all(t.deleted_at is None for t in transfers)
+    assert {t.amount for t in transfers} == {Decimal("100.00")}
+    this_period_save = next(t for t in rows if t.amount == Decimal("30.00"))
+    assert this_period_save.deleted_at is not None
+    held_after = await savings_service.balance(db_session, expense.savings_id)
+    assert held_after == Decimal(0)
+    assert _live_pool(rows) + held_after == total_before

@@ -170,3 +170,17 @@ async def update_transaction(
 async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) -> None:
     transaction.deleted_at = func.now()
     await db.commit()
+
+
+async def close_transactions(db: AsyncSession, expense: Expense) -> None:
+    """
+    Handles soft-deleting all transactions that relate to a given expense within a period.
+    Because we create a new expense per roll-over we shouldnt need to check for period
+    """
+
+    transactions = await db.execute(
+        live_transactions().where(Transaction.expense_id == expense.id)
+    )
+
+    for transaction in transactions.scalars().all():
+        transaction.deleted_at = func.now()

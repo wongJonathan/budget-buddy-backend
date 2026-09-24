@@ -12,6 +12,7 @@ from app.ownership import verify_owned_refs
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
 from app.schemas.fields import current_period
 from app.services import savings as savings_service
+from app.services import transaction as transaction_service
 from app.services.visibility import live_expenses
 
 
@@ -96,6 +97,7 @@ async def soft_delete_expense(db: AsyncSession, expense: Expense) -> None:
     refuses it, which is what stops one month's tidy-up destroying a year of savings.
     """
     _require_open_period(expense)
+    await transaction_service.close_transactions(db, expense)
     await savings_service.close_savings(db, expense)
     expense.deleted_at = func.now()
     await db.commit()

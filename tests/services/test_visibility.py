@@ -165,18 +165,42 @@ async def test_the_hidden_rows_are_still_there(db_session: AsyncSession) -> None
     assert len((await db_session.scalars(select(Transaction))).all()) == 1
 
 
-async def test_soft_deleting_an_expense_leaves_its_transactions_on_the_record(
+async def test_soft_deleting_an_expense_withdraws_its_transactions(
     db_session: AsyncSession,
 ) -> None:
-    """Deleting the plan removes the plan. The GBP 5 still left the account, and a sum
-    over money that dropped it would quietly hand the User their spending back."""
+    """Deleting an Expense withdraws its Period's money movements with it
+    (docs/adr/0014). Explicitly, by setting each Transaction's own flag - not through
+    an ancestor rule - and with the Expense's exact `deleted_at`, which is how Restore
+    later tells what this deletion took apart from what the User had deleted already."""
     user, budget, expense, transaction = await seed_chain(db_session)
 
     await expense_service.soft_delete_expense(db_session, expense)
 
     assert await visible_expenses(db_session, budget) == []
-    visible = await visible_transactions(db_session, user)
-    assert [t.id for t in visible] == [transaction.id]
+    assert await visible_transactions(db_session, user) == []
+    await db_session.refresh(expense)
+    await db_session.refresh(transaction)
+    assert transaction.deleted_at is not None
+    assert transaction.deleted_at == expense.deleted_at
+
+
+async def test_a_transaction_deleted_beforehand_keeps_its_own_deleted_at(
+    db_session: AsyncSession,
+) -> None:
+    """The withdrawal only touches undeleted rows. Re-stamping one the User had already
+    deleted would make it match the Expense's `deleted_at`, and Restore would bring
+    back something the User deleted on purpose."""
+    user, _, expense, transaction = await seed_chain(db_session)
+    await transaction_service.soft_delete_transaction(db_session, transaction)
+    await db_session.refresh(transaction)
+    deleted_by_the_user = transaction.deleted_at
+
+    await expense_service.soft_delete_expense(db_session, expense)
+
+    await db_session.refresh(expense)
+    await db_session.refresh(transaction)
+    assert transaction.deleted_at == deleted_by_the_user
+    assert transaction.deleted_at != expense.deleted_at
 
 
 async def test_soft_deleting_a_transaction_leaves_its_parents_alone(
@@ -401,19 +425,18 @@ async def test_income_belongs_to_its_owner_only(db_session: AsyncSession) -> Non
 
 
 # ---------------------------------------------------------------------------
-# the ancestor rule stops at Expense, because money is not a plan
+# the ancestor rule stops at Expense; deleting one withdraws explicitly
 # ---------------------------------------------------------------------------
 
 
-async def test_deleting_an_expense_does_not_unspend_its_transactions(
+async def test_deleting_an_expense_withdraws_its_spends_from_the_pool(
     db_session: AsyncSession,
 ) -> None:
-    """The regression this amendment exists for.
+    """The cost ADR-0014 accepts, pinned so it stays deliberate.
 
-    Any sum over money counts Transactions. While Transaction was subject to the
-    ancestor rule, deleting an Expense dropped every Spend beneath it from that sum, and
-    the User's Pool silently rose by everything they had spent on it - money conjured
-    from a delete. See ADR-0007 as amended.
+    Deleting an Expense withdraws its Period's Spends, so the Pool rises by what was
+    spent on it and reads above the bank until the User re-records the Spend against
+    another Expense. Income has no Expense, so the withdrawal never touches it.
     """
     user, _, expense, _ = await seed_chain(db_session)  # seeds a GBP 5.00 spend
     income = Transaction(
@@ -442,7 +465,7 @@ async def test_deleting_an_expense_does_not_unspend_its_transactions(
     after = pool(await visible_transactions(db_session, user))
 
     assert before == Decimal("995.00")
-    assert after == before
+    assert after == Decimal("1000.00")
 
 
 async def test_a_deleted_transaction_is_still_hidden(db_session: AsyncSession) -> None:
