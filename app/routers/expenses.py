@@ -2,7 +2,13 @@ from collections.abc import Sequence
 
 from fastapi import APIRouter, status
 
-from app.dependencies import CurrentUser, DbSession, OwnedBudget, OwnedExpense
+from app.dependencies import (
+    CurrentUser,
+    DbSession,
+    ReadableBudget,
+    ReadableExpense,
+    WritableExpense,
+)
 from app.models.expense import Expense
 from app.schemas.expense import ExpenseCreate, ExpenseRead, ExpenseUpdate
 from app.schemas.fields import RequestedPeriod, current_period
@@ -27,25 +33,25 @@ async def create_bulk_expenses(
 
 
 @router.get("/{expense_id}", response_model=ExpenseRead)
-async def get_expense(expense: OwnedExpense) -> Expense:
+async def get_expense(expense: ReadableExpense) -> Expense:
     return expense
 
 
 @router.patch("/{expense_id}", response_model=ExpenseRead)
 async def update_expense(
-    expense: OwnedExpense, data: ExpenseUpdate, db: DbSession
+    expense: WritableExpense, data: ExpenseUpdate, db: DbSession
 ) -> Expense:
     return await expense_service.update_expense(db, expense, data)
 
 
 @router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_expense(expense: OwnedExpense, db: DbSession) -> None:
+async def delete_expense(expense: WritableExpense, db: DbSession) -> None:
     await expense_service.soft_delete_expense(db, expense)
 
 
 @budget_expenses_router.get("/expenses", response_model=list[ExpenseRead])
 async def list_budget_expenses(
-    budget: OwnedBudget,
+    budget: ReadableBudget,
     db: DbSession,
     period: RequestedPeriod = None,
     include_deleted: bool = False,

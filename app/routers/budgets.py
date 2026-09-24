@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, status
 
-from app.dependencies import CurrentUser, DbSession, OwnedBudget
+from app.dependencies import CurrentUser, DbSession, ReadableBudget, WritableBudget
 from app.models.budget import Budget
 from app.schemas.budget import (
     BudgetCreate,
@@ -21,7 +21,7 @@ async def create_budget(data: BudgetCreate, user: CurrentUser, db: DbSession) ->
 
 @router.get("/{budget_id}", response_model=BudgetRead)
 async def get_budget(
-    budget: OwnedBudget,
+    budget: ReadableBudget,
 ) -> Budget:
     return budget
 
@@ -46,10 +46,10 @@ async def json_convert_budget(
 
 
 @router.patch("/{budget_id}", response_model=BudgetRead)
-async def update_budget(budget: OwnedBudget, data: BudgetUpdate, db: DbSession) -> Budget:
+async def update_budget(budget: WritableBudget, data: BudgetUpdate, db: DbSession) -> Budget:
     return await budget_service.update_budget(db, budget, data)
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_budget(budget: OwnedBudget, user: CurrentUser, db: DbSession) -> None:
+async def delete_budget(budget: WritableBudget, user: CurrentUser, db: DbSession) -> None:
     await budget_service.soft_delete_budget(db, budget, user)

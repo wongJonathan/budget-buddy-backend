@@ -33,10 +33,18 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def owned_path[T](model: type[T], param_name: str) -> Callable[..., Awaitable[T]]:
+def owned_path[T](
+    model: type[T], param_name: str, *, allow_deleted: bool = False
+) -> Callable[..., Awaitable[T]]:
     """Resolve a path parameter to a row the caller owns, or 404.
 
-    One implementation for all three entities. The lookup and the 404 come from
+    `allow_deleted=True` is the readable variant, for `GET /{id}`: the caller's
+    soft-deleted row is returned. The default is the writable variant, for PATCH
+    and DELETE: the caller's soft-deleted row is a 409 (`DeletedRow`). Deleting an
+    already-deleted row is refused rather than a silent no-op because a second
+    `deleted_at` write would break Restore's match (docs/adr/0014).
+
+    One implementation for every entity. The lookup and the 404 come from
     `ownership.require_owned`, which the create-time payload checks also go
     through, so "owned" cannot come to mean two different things depending on
     whether the id arrived in the path or in the body.
@@ -48,7 +56,9 @@ def owned_path[T](model: type[T], param_name: str) -> Callable[..., Awaitable[T]
     """
 
     async def dependency(user: CurrentUser, db: DbSession, **path: uuid.UUID) -> T:
-        return await require_owned(db, model, path[param_name], user)
+        return await require_owned(
+            db, model, path[param_name], user, allow_deleted=allow_deleted
+        )
 
     dependency.__signature__ = Signature(  # type: ignore[attr-defined]
         [
@@ -62,9 +72,25 @@ def owned_path[T](model: type[T], param_name: str) -> Callable[..., Awaitable[T]
     return dependency
 
 
-OwnedBudget = Annotated[Budget, Depends(owned_path(Budget, "budget_id"))]
-OwnedExpense = Annotated[Expense, Depends(owned_path(Expense, "expense_id"))]
-OwnedTransaction = Annotated[
+# Readable: the caller's row, deleted or not. For GET routes only.
+ReadableBudget = Annotated[
+    Budget, Depends(owned_path(Budget, "budget_id", allow_deleted=True))
+]
+ReadableExpense = Annotated[
+    Expense, Depends(owned_path(Expense, "expense_id", allow_deleted=True))
+]
+ReadableTransaction = Annotated[
+    Transaction,
+    Depends(owned_path(Transaction, "transaction_id", allow_deleted=True)),
+]
+ReadableCategory = Annotated[
+    Category, Depends(owned_path(Category, "category_id", allow_deleted=True))
+]
+
+# Writable: the caller's live row; a deleted one is a 409. For PATCH and DELETE.
+WritableBudget = Annotated[Budget, Depends(owned_path(Budget, "budget_id"))]
+WritableExpense = Annotated[Expense, Depends(owned_path(Expense, "expense_id"))]
+WritableTransaction = Annotated[
     Transaction, Depends(owned_path(Transaction, "transaction_id"))
 ]
-OwnedCategory = Annotated[Category, Depends(owned_path(Category, "category_id"))]
+WritableCategory = Annotated[Category, Depends(owned_path(Category, "category_id"))]

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from app.dependencies import CurrentUser, DbSession, OwnedTransaction
+from app.dependencies import CurrentUser, DbSession, ReadableTransaction, WritableTransaction
 from app.models.transaction import Transaction
 from app.schemas.fields import current_period, last_of_month
 from app.schemas.transaction import (
@@ -57,13 +57,13 @@ async def list_transactions(
 
 
 @router.get("/{transaction_id}", response_model=TransactionRead)
-async def get_transaction(transaction: OwnedTransaction) -> Transaction:
+async def get_transaction(transaction: ReadableTransaction) -> Transaction:
     return transaction
 
 
 @router.patch("/{transaction_id}", response_model=TransactionRead)
 async def update_transaction(
-    transaction: OwnedTransaction,
+    transaction: WritableTransaction,
     data: TransactionUpdate,
     user: CurrentUser,
     db: DbSession,
@@ -72,5 +72,5 @@ async def update_transaction(
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_transaction(transaction: OwnedTransaction, db: DbSession) -> None:
+async def delete_transaction(transaction: WritableTransaction, db: DbSession) -> None:
     await transaction_service.soft_delete_transaction(db, transaction)

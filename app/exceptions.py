@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -13,12 +14,23 @@ class AppError(Exception):
         super().__init__(message)
 
 
+class DeletedRow(AppError):
+    def __init__(self, model: type[Any]) -> None:
+        super().__init__(f"{model.__name__} is deleted", status_code=409)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(_request: Request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": exc.message}
+        )
 
     @app.exception_handler(Exception)
-    async def handle_unexpected_error(_request: Request, exc: Exception) -> JSONResponse:
+    async def handle_unexpected_error(
+        _request: Request, exc: Exception
+    ) -> JSONResponse:
         logger.exception("Unhandled exception", exc_info=exc)
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        return JSONResponse(
+            status_code=500, content={"detail": "Internal server error"}
+        )

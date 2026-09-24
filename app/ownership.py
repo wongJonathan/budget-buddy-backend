@@ -19,10 +19,14 @@ schema is therefore enough to get it checked; there is no second place to
 remember. `tests/test_ownership.py` fails the build if an `*_id` field on an
 input schema is left unannotated and unexempted.
 
-Lookups go through `visibility.live_*`, so a soft-deleted parent is "not yours"
-for the same reason a stranger's is. Both raise `NotOwned`, which the handler in
+Lookups go through `visibility.live_*` with the row's own flag relaxed, so an
+ancestor's deletion still hides it (an Expense under a deleted Budget is not
+found) while the row's own deletion does not. Ownership is checked first: a row
+that is missing or someone else's raises `NotOwned`, which the handler in
 `exceptions.py` renders as a 404 - never a 403, which would confirm the row
-exists.
+exists. Only once the row is known to be the caller's does its own `deleted_at`
+matter, and then it raises `DeletedRow`, a 409: visible doesn't mean usable, and
+a deleted row is never a valid parent or a valid target for a write.
 
 See `docs/adr/0008-ownership-declared-on-schema-fields.md` for why the
 requirement is declared on the field rather than written out per service, and
@@ -30,9 +34,8 @@ why the database-level version of this was deferred rather than rejected.
 """
 
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -40,7 +43,7 @@ from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.exceptions import AppError
+from app.exceptions import AppError, DeletedRow
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
@@ -82,11 +85,15 @@ ExpenseRef = Annotated[uuid.UUID, Owned(Expense)]
 TransactionRef = Annotated[uuid.UUID, Owned(Transaction)]
 
 
+class _LiveSelect(Protocol):
+    def __call__(self, *, include_deleted: bool = False) -> Select[Any]: ...
+
+
 @dataclass(frozen=True)
 class _Ownable:
     """How to find one entity's rows, and which columns decide identity and owner."""
 
-    live: Callable[[], Select[Any]]
+    live: _LiveSelect
     id_column: InstrumentedAttribute[uuid.UUID]
     owner_column: InstrumentedAttribute[uuid.UUID]
 
@@ -102,18 +109,32 @@ _OWNABLE: dict[type[Any], _Ownable] = {
 
 
 async def require_owned[T](
-    db: AsyncSession, model: type[T], obj_id: uuid.UUID, user: User
+    db: AsyncSession,
+    model: type[T],
+    obj_id: uuid.UUID,
+    user: User,
+    *,
+    allow_deleted: bool = False,
 ) -> T:
-    """Return the caller's row of `model`, or raise `NotOwned`.
+    """Return the caller's row of `model`, or raise `NotOwned` / `DeletedRow`.
 
     The single lookup behind both ownership checks: the path-parameter
     dependencies in `dependencies.py` and the payload walk below.
+
+    The owner filter is part of the query, so another User's row never loads and
+    can't reach the `deleted_at` check - it is a 404 whether deleted or not. The
+    caller's own deleted row is returned only with `allow_deleted` (reads), and is
+    otherwise a 409 (writes, and any use as a parent).
     """
     ownable = _OWNABLE[model]
-    query = ownable.live().where(ownable.id_column == obj_id, ownable.owner_column == user.id)
+    query = ownable.live(include_deleted=True).where(
+        ownable.id_column == obj_id, ownable.owner_column == user.id
+    )
     row = (await db.scalars(query)).one_or_none()
     if row is None:
         raise NotOwned(model)
+    if row.deleted_at is not None and not allow_deleted:
+        raise DeletedRow(model)
     return row  # type: ignore[no-any-return]
 
 

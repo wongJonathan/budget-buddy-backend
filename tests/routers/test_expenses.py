@@ -180,7 +180,7 @@ async def test_patching_an_expense_into_another_period_is_rejected(
 # ---------------------------------------------------------------------------
 # Router: GET /budgets/{budget_id}/expenses
 #
-# The budget-scoped listing. `{budget_id}` is a path parameter so `OwnedBudget`
+# The budget-scoped listing. `{budget_id}` is a path parameter so `ReadableBudget`
 # resolves it - ownership, the 404 and the soft-deleted-budget filter all come
 # from the same dependency every other budget route uses, rather than from a
 # hand-written check on a query parameter.

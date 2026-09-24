@@ -16,6 +16,7 @@ import importlib
 import pkgutil
 import uuid
 from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,11 +26,13 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.schemas
+from app.exceptions import DeletedRow
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.enums import Frequency, TransactionType
+from app.models.expense import Expense
 from app.models.user import User
-from app.ownership import NotOwned, _owned_marker
+from app.ownership import NotOwned, _owned_marker, require_owned
 from app.schemas.expense import ExpenseCreate
 from app.schemas.fields import current_period
 from app.schemas.transaction import TransactionCreate
@@ -37,7 +40,13 @@ from app.schemas.user import UserUpdate
 from app.services import expense as expense_service
 from app.services import transaction as transaction_service
 from app.services import user as user_service
-from tests.factories import make_scalars_one
+from tests.factories import (
+    make_budget,
+    make_category,
+    make_expense,
+    make_scalars_one,
+    make_transaction,
+)
 
 # Fields named `<x>_id` that are deliberately not ownership-checked. Every entry
 # needs a reason, and the reason has to be about the field, not about effort.
@@ -163,25 +172,94 @@ async def test_an_expense_in_your_own_budget_still_works(
 
 
 async def test_a_deleted_budget_is_not_a_valid_parent(db_session: AsyncSession) -> None:
-    """Ownership rides on the visibility selects, so a soft-deleted budget is as
-    unusable as someone else's - the two rules cannot drift apart."""
+    """Visible doesn't mean usable: the caller's own deleted budget is a 409, not a
+    404 - ownership is already established, so there is nothing left to hide."""
     alice, budget, category = await _account(db_session, "alice")
     budget.deleted_at = func.now()
     await db_session.commit()
 
-    with pytest.raises(NotOwned, match="Budget not found"):
+    with pytest.raises(DeletedRow, match="Budget is deleted"):
         await expense_service.create_expense(db_session, _expense_payload(budget, category), alice)
 
 
 async def test_a_deleted_category_is_not_a_valid_parent(db_session: AsyncSession) -> None:
-    """Category goes through `live_categories` like every other parent, so a deleted
-    label can't be put on a new Expense."""
+    """A deleted label can't be put on a new Expense."""
     alice, budget, category = await _account(db_session, "alice")
     category.deleted_at = func.now()
     await db_session.commit()
 
-    with pytest.raises(NotOwned, match="Category not found"):
+    with pytest.raises(DeletedRow, match="Category is deleted"):
         await expense_service.create_expense(db_session, _expense_payload(budget, category), alice)
+
+
+async def test_a_deleted_expense_is_not_a_valid_parent_for_a_transaction(
+    db_session: AsyncSession,
+) -> None:
+    alice, budget, category = await _account(db_session, "alice")
+    expense = await expense_service.create_expense(
+        db_session, _expense_payload(budget, category), alice
+    )
+    expense.deleted_at = func.now()
+    await db_session.commit()
+
+    with pytest.raises(DeletedRow, match="Expense is deleted"):
+        await transaction_service.create_transaction(
+            db_session,
+            alice,
+            TransactionCreate(
+                expense_id=expense.id,
+                type=TransactionType.SPEND,
+                name="Shop",
+                amount=Decimal("5.00"),
+                date=datetime.date.today(),
+            ),
+        )
+
+
+async def test_another_users_deleted_row_is_still_not_found(
+    db_session: AsyncSession,
+) -> None:
+    """Ownership is checked before deletion, so a 409 can never confirm that a
+    stranger's row exists (docs/adr/0008)."""
+    alice, _, alice_category = await _account(db_session, "alice")
+    _, bob_budget, _ = await _account(db_session, "bob")
+    bob_budget.deleted_at = func.now()
+    await db_session.commit()
+
+    with pytest.raises(NotOwned, match="Budget not found"):
+        await expense_service.create_expense(
+            db_session, _expense_payload(bob_budget, alice_category), alice
+        )
+
+
+async def test_the_readable_lookup_returns_the_callers_deleted_row(
+    db_session: AsyncSession,
+) -> None:
+    alice, budget, _ = await _account(db_session, "alice")
+    budget.deleted_at = func.now()
+    await db_session.commit()
+
+    found = await require_owned(db_session, Budget, budget.id, alice, allow_deleted=True)
+
+    assert found.id == budget.id
+    with pytest.raises(DeletedRow):
+        await require_owned(db_session, Budget, budget.id, alice)
+
+
+async def test_the_readable_lookup_still_hides_an_expense_under_a_deleted_budget(
+    db_session: AsyncSession,
+) -> None:
+    """`allow_deleted` relaxes the row's own flag only. An Expense whose Budget is
+    gone is hidden, not deleted, and stays a 404."""
+    alice, budget, category = await _account(db_session, "alice")
+    expense = await expense_service.create_expense(
+        db_session, _expense_payload(budget, category), alice
+    )
+    budget.deleted_at = func.now()
+    await db_session.commit()
+
+    with pytest.raises(NotOwned, match="Expense not found"):
+        await require_owned(db_session, Expense, expense.id, alice, allow_deleted=True)
 
 
 async def test_bulk_creation_is_checked_per_row(db_session: AsyncSession) -> None:
@@ -311,3 +389,74 @@ async def test_a_forged_parent_surfaces_as_404_not_500(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Budget not found"
+
+
+# ---------------------------------------------------------------------------
+# readable vs writable path dependencies
+# ---------------------------------------------------------------------------
+# GET /{id} uses the readable variant and returns the caller's deleted row. PATCH
+# and DELETE use the writable one and refuse it with a 409 - for DELETE that is
+# what keeps a second `deleted_at` write from breaking Restore's match
+# (docs/adr/0014).
+
+_DELETED_AT = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+
+_ROUTES = [
+    pytest.param(make_budget, "/budgets", {"name": "New"}, id="budget"),
+    pytest.param(make_category, "/categories", {"name": "New"}, id="category"),
+    pytest.param(make_expense, "/expenses", {"name": "New"}, id="expense"),
+    pytest.param(make_transaction, "/transactions", {"amount": "1.00"}, id="transaction"),
+]
+
+
+@pytest.mark.parametrize(("make", "prefix", "patch_body"), _ROUTES)
+async def test_get_returns_the_callers_deleted_row(
+    authed_client: AsyncClient,
+    mock_db: MagicMock,
+    make: Any,
+    prefix: str,
+    patch_body: dict[str, str],
+) -> None:
+    row = make(deleted_at=_DELETED_AT)
+    mock_db.scalars.return_value = make_scalars_one(row)
+
+    response = await authed_client.get(f"{prefix}/{row.id}")
+
+    assert response.status_code == 200
+    assert response.json()["deleted_at"] is not None
+
+
+@pytest.mark.parametrize(("make", "prefix", "patch_body"), _ROUTES)
+async def test_patch_refuses_the_callers_deleted_row(
+    authed_client: AsyncClient,
+    mock_db: MagicMock,
+    make: Any,
+    prefix: str,
+    patch_body: dict[str, str],
+) -> None:
+    row = make(deleted_at=_DELETED_AT)
+    mock_db.scalars.return_value = make_scalars_one(row)
+
+    response = await authed_client.patch(f"{prefix}/{row.id}", json=patch_body)
+
+    assert response.status_code == 409
+    mock_db.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("make", "prefix", "patch_body"), _ROUTES)
+async def test_delete_refuses_an_already_deleted_row(
+    authed_client: AsyncClient,
+    mock_db: MagicMock,
+    make: Any,
+    prefix: str,
+    patch_body: dict[str, str],
+) -> None:
+    """A second `deleted_at` write would break Restore's match, so it is refused."""
+    row = make(deleted_at=_DELETED_AT)
+    mock_db.scalars.return_value = make_scalars_one(row)
+
+    response = await authed_client.delete(f"{prefix}/{row.id}")
+
+    assert response.status_code == 409
+    assert row.deleted_at == _DELETED_AT
+    mock_db.commit.assert_not_awaited()

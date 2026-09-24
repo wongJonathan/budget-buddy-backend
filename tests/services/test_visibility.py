@@ -302,7 +302,7 @@ async def test_deleting_an_account_keeps_the_audit_trail_intact(
 
 
 async def test_a_budget_is_invisible_to_a_different_user(db_session: AsyncSession) -> None:
-    """The property `OwnedBudget` relies on, asserted against a real query.
+    """The property `ReadableBudget` relies on, asserted against a real query.
 
     The router tests can't prove this: `mock_db.scalars` hands back whatever budget
     they stub regardless of the `user_id` filter in the select. Only a real database
