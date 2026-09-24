@@ -4,10 +4,10 @@ from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base, UUIDPrimaryKeyMixin
+from app.database import Base, CreatableModel
 
 
-class Category(UUIDPrimaryKeyMixin, Base):
+class Category(CreatableModel, Base):
     __tablename__ = "categories"
 
     user_id: Mapped[uuid.UUID] = mapped_column(

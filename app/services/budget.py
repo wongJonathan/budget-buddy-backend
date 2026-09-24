@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -18,7 +18,7 @@ from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.category import CategoryCreate
 from app.schemas.expense import ExpenseCreate
 from app.schemas.fields import current_period
-from app.services.visibility import live_budgets
+from app.services.visibility import live_budgets, live_categories
 
 _REQUIRED_EXPENSE_KEYS = {"tag", "name", "cost", "frequency", "amountSaved"}
 
@@ -83,14 +83,18 @@ async def create_budget(db: AsyncSession, user: User, data: BudgetCreate) -> Bud
     return budget
 
 
-async def get_budget(db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID) -> Budget | None:
+async def get_budget(
+    db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
+) -> Budget | None:
     result = await db.scalars(
         live_budgets().where(Budget.id == budget_id, Budget.user_id == user_id)
     )
     return result.one_or_none()
 
 
-async def list_budgets(db: AsyncSession, user_id: uuid.UUID | None = None) -> Sequence[Budget]:
+async def list_budgets(
+    db: AsyncSession, user_id: uuid.UUID | None = None
+) -> Sequence[Budget]:
     query = live_budgets()
     if user_id is not None:
         query = query.where(Budget.user_id == user_id)
@@ -109,7 +113,7 @@ async def update_budget(db: AsyncSession, budget: Budget, data: BudgetUpdate) ->
 async def soft_delete_budget(db: AsyncSession, budget: Budget, user: User) -> None:
     if user.active_budget_id == budget.id:
         raise ActiveBudgetNotDeletable
-    budget.is_deleted = True
+    budget.deleted_at = func.now()
     await db.commit()
 
 
@@ -160,9 +164,12 @@ async def convert_json_to_budget(
         category_names.add(expense_data["tag"])
         expenses.append(expense_data)
 
-    # Check for existing categories
+    # Check for existing categories. A deleted one is not reused: the import creates a
+    # fresh Category with the same name instead.
     matching_categories = await db.execute(
-        select(Category).where(Category.user_id == user.id, Category.name.in_(category_names))
+        live_categories().where(
+            Category.user_id == user.id, Category.name.in_(category_names)
+        )
     )
     for matching_category in matching_categories.scalars().all():
         category_names.remove(matching_category.name)
@@ -197,7 +204,9 @@ async def convert_json_to_budget(
         new_expense = Expense(**expense_metadata.model_dump(), user_id=user.id)
         db.add(new_expense)
         await db.flush()
-        await _import_amount_saved(db, new_expense, Decimal(expense["amountSaved"]), user)
+        await _import_amount_saved(
+            db, new_expense, Decimal(expense["amountSaved"]), user
+        )
 
     await db.commit()
 

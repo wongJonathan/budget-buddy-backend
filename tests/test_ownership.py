@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.schemas
@@ -165,10 +166,21 @@ async def test_a_deleted_budget_is_not_a_valid_parent(db_session: AsyncSession) 
     """Ownership rides on the visibility selects, so a soft-deleted budget is as
     unusable as someone else's - the two rules cannot drift apart."""
     alice, budget, category = await _account(db_session, "alice")
-    budget.is_deleted = True
+    budget.deleted_at = func.now()
     await db_session.commit()
 
     with pytest.raises(NotOwned, match="Budget not found"):
+        await expense_service.create_expense(db_session, _expense_payload(budget, category), alice)
+
+
+async def test_a_deleted_category_is_not_a_valid_parent(db_session: AsyncSession) -> None:
+    """Category goes through `live_categories` like every other parent, so a deleted
+    label can't be put on a new Expense."""
+    alice, budget, category = await _account(db_session, "alice")
+    category.deleted_at = func.now()
+    await db_session.commit()
+
+    with pytest.raises(NotOwned, match="Category not found"):
         await expense_service.create_expense(db_session, _expense_payload(budget, category), alice)
 
 

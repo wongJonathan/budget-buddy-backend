@@ -44,9 +44,9 @@ async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
 
     Built on `live_transactions`, like every other read. That was briefly impossible:
     while Transaction was subject to the ancestor rule, a soft-deleted Expense hid its
-    own SAVE rows and the fund quietly read zero, so this had to filter `is_deleted`
+    own SAVE rows and the fund quietly read zero, so this had to filter the deleted flag
     for itself. ADR-0007 as amended took Transaction out of that rule and the special
-    case went with it - a fund ends through its own `is_deleted`, and a movement stops
+    case went with it - a fund ends through its own `deleted_at`, and a movement stops
     counting through the Transaction's.
     """
     visible = live_transactions().subquery()
@@ -88,7 +88,7 @@ async def open_savings(db: AsyncSession, expense: Expense, user: User) -> Saving
     """
     if expense.savings_id is not None:
         existing = await db.get(Savings, expense.savings_id)
-        if existing is not None and not existing.is_deleted:
+        if existing is not None and existing.deleted_at is None:
             return existing
 
     savings = Savings(user_id=user.id)
@@ -117,14 +117,14 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
     asserts money arrived from outside, and nothing arrived. It would inflate the
     account above the bank by the amount of the fund.
 
-    Idempotent by way of the `is_deleted` check - closing an already-closed fund is a
+    Idempotent by way of the `deleted_at` check - closing an already-closed fund is a
     no-op rather than a second drain.
     """
     if expense.savings_id is None:
         return
 
     savings = await db.get(Savings, expense.savings_id)
-    if savings is None or savings.is_deleted:
+    if savings is None or savings.deleted_at is not None:
         return
 
     held = await balance(db, savings.id)
@@ -158,4 +158,4 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
             )
         )
 
-    savings.is_deleted = True
+    savings.deleted_at = func.now()

@@ -33,7 +33,7 @@ async def test_create_budget(
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "Groceries Budget"
-    assert body["is_deleted"] is False
+    assert body["deleted_at"] is None
     # Ownership comes from the session, not the payload - BudgetCreate has no user_id.
     assert body["user_id"] == str(current_user.id)
     mock_db.add.assert_called_once()
@@ -60,13 +60,13 @@ async def test_update_budget_not_found(authed_client: AsyncClient, mock_db: Magi
 
 
 async def test_delete_budget_is_soft_delete(authed_client: AsyncClient, mock_db: MagicMock) -> None:
-    budget = make_budget(is_deleted=False)
+    budget = make_budget()
     mock_db.scalars.return_value = make_scalars_one(budget)
 
     response = await authed_client.delete(f"/budgets/{budget.id}")
 
     assert response.status_code == 204
-    assert budget.is_deleted is True
+    assert budget.deleted_at is not None
     mock_db.delete.assert_not_called()
     mock_db.commit.assert_awaited_once()
 

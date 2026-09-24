@@ -168,5 +168,5 @@ async def update_transaction(
 
 
 async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) -> None:
-    transaction.is_deleted = True
+    transaction.deleted_at = func.now()
     await db.commit()

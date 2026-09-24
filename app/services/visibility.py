@@ -14,7 +14,9 @@ for the deleted Expenses of a live Budget is a real feature (it backs
 `GET /budgets/{id}/expenses?include_deleted=true`); surfacing anything belonging to a deleted
 Budget is not, because the parent being gone is what "deleted" means for the child.
 
-Category takes no part in this: it hard-deletes, guarded by ON DELETE RESTRICT.
+Category has no ancestor and is no one's ancestor for visibility: deleting one hides the
+label from lists, lookups and new rows, but an Expense already carrying it keeps it and
+stays visible.
 
 **Transaction takes no part in the ancestor rule.** It applies between Budget and
 Expense only. A Transaction is visible whenever it is not itself deleted, whatever
@@ -36,6 +38,7 @@ amended.
 from sqlalchemy import Select, select
 
 from app.models.budget import Budget
+from app.models.category import Category
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 
@@ -48,16 +51,27 @@ def live_budgets(*, include_deleted: bool = False) -> Select[tuple[Budget]]:
     """
     query = select(Budget)
     if not include_deleted:
-        query = query.where(~Budget.is_deleted)
+        query = query.where(Budget.deleted_at.is_(None))
+    return query
+
+
+def live_categories(*, include_deleted: bool = False) -> Select[tuple[Category]]:
+    """Categories that haven't been deleted.
+
+    Like Budget, a Category's only ancestor is its User, so there is nothing to join.
+    """
+    query = select(Category)
+    if not include_deleted:
+        query = query.where(Category.deleted_at.is_(None))
     return query
 
 
 def live_expenses(*, include_deleted: bool = False) -> Select[tuple[Expense]]:
     """Expenses whose Budget is live, and which aren't themselves deleted."""
     query = select(Expense).join(Budget, Budget.id == Expense.budget_id)
-    query = query.where(~Budget.is_deleted)
+    query = query.where(Budget.deleted_at.is_(None))
     if not include_deleted:
-        query = query.where(~Expense.is_deleted)
+        query = query.where(Expense.deleted_at.is_(None))
     return query
 
 
@@ -75,5 +89,5 @@ def live_transactions(*, include_deleted: bool = False) -> Select[tuple[Transact
     """
     query = select(Transaction)
     if not include_deleted:
-        query = query.where(~Transaction.is_deleted)
+        query = query.where(Transaction.deleted_at.is_(None))
     return query

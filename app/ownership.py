@@ -36,7 +36,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
-from sqlalchemy import Select, select
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -46,7 +46,12 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.transaction import Transaction
 from app.models.user import User
-from app.services.visibility import live_budgets, live_expenses, live_transactions
+from app.services.visibility import (
+    live_budgets,
+    live_categories,
+    live_expenses,
+    live_transactions,
+)
 
 
 class NotOwned(AppError):
@@ -87,11 +92,10 @@ class _Ownable:
 
 
 # The registry every ownership check reads. One entry per ownable entity, and
-# adding an entity is this line plus its `*Ref` alias above. Category is a bare
-# select: it hard-deletes, so it has no live_* of its own.
+# adding an entity is this line plus its `*Ref` alias above.
 _OWNABLE: dict[type[Any], _Ownable] = {
     Budget: _Ownable(live_budgets, Budget.id, Budget.user_id),
-    Category: _Ownable(lambda: select(Category), Category.id, Category.user_id),
+    Category: _Ownable(live_categories, Category.id, Category.user_id),
     Expense: _Ownable(live_expenses, Expense.id, Expense.user_id),
     Transaction: _Ownable(live_transactions, Transaction.id, Transaction.user_id),
 }
@@ -106,7 +110,7 @@ async def require_owned[T](
     dependencies in `dependencies.py` and the payload walk below.
     """
     ownable = _OWNABLE[model]
-    query = ownable.live().where(ownable.id_column == obj_id, ownable.owner_column == user.id)  # type: ignore
+    query = ownable.live().where(ownable.id_column == obj_id, ownable.owner_column == user.id)
     row = (await db.scalars(query)).one_or_none()
     if row is None:
         raise NotOwned(model)

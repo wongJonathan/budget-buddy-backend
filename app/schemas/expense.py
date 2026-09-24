@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import Frequency
 from app.ownership import BudgetRef, CategoryRef
+from app.schemas.base import CreatableSchema
 from app.schemas.fields import CurrentPeriod
 
 
@@ -31,7 +32,7 @@ class ExpenseUpdate(BaseModel):
     period: CurrentPeriod | None = None
 
 
-class ExpenseRead(BaseModel):
+class ExpenseRead(CreatableSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -47,4 +48,3 @@ class ExpenseRead(BaseModel):
     goal_amount: Decimal | None
     goal_date: date | None
     period: date
-    is_deleted: bool

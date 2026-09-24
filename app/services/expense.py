@@ -2,6 +2,7 @@ import datetime
 import uuid
 from collections.abc import Sequence
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -53,7 +54,9 @@ async def create_expense(db: AsyncSession, data: ExpenseCreate, user: User) -> E
     return expense
 
 
-async def create_bulk_expenses(db: AsyncSession, data: list[ExpenseCreate], user: User) -> None:
+async def create_bulk_expenses(
+    db: AsyncSession, data: list[ExpenseCreate], user: User
+) -> None:
     for expense_data in data:
         await verify_owned_refs(db, expense_data, user)
         expense = Expense(**expense_data.model_dump(), user_id=user.id)
@@ -72,7 +75,9 @@ async def get_expense(
     return result.one_or_none()
 
 
-async def update_expense(db: AsyncSession, expense: Expense, data: ExpenseUpdate) -> Expense:
+async def update_expense(
+    db: AsyncSession, expense: Expense, data: ExpenseUpdate
+) -> Expense:
     _require_open_period(expense)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(expense, field, value)
@@ -92,7 +97,7 @@ async def soft_delete_expense(db: AsyncSession, expense: Expense) -> None:
     """
     _require_open_period(expense)
     await savings_service.close_savings(db, expense)
-    expense.is_deleted = True
+    expense.deleted_at = func.now()
     await db.commit()
 
 

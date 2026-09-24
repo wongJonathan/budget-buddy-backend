@@ -2,15 +2,15 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric, func
+from sqlalchemy import Date, ForeignKey, Index, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base, UUIDPrimaryKeyMixin
+from app.database import Base, CreatableModel
 from app.models.enums import TransactionType, pg_enum
 
 
-class Transaction(UUIDPrimaryKeyMixin, Base):
+class Transaction(CreatableModel, Base):
     """Any change to the money available to a User - in, out, or between Pool and fund."""
 
     __tablename__ = "transactions"
@@ -47,8 +47,6 @@ class Transaction(UUIDPrimaryKeyMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
     date: Mapped[datetime.date] = mapped_column(Date)
-    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
-    is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")
     transfer_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("transactions.id", ondelete="SET NULL"),

@@ -25,7 +25,7 @@ async def test_deleting_an_inactive_budget_is_allowed(mock_db: MagicMock) -> Non
 
     await soft_delete_budget(mock_db, budget, user)
 
-    assert budget.is_deleted is True
+    assert budget.deleted_at is not None
     mock_db.commit.assert_awaited_once()
 
 
@@ -37,7 +37,7 @@ async def test_deleting_the_active_budget_is_refused(mock_db: MagicMock) -> None
     with pytest.raises(ActiveBudgetNotDeletable):
         await soft_delete_budget(mock_db, budget, user)
 
-    assert budget.is_deleted is False
+    assert budget.deleted_at is None
     mock_db.commit.assert_not_awaited()
 
 
@@ -63,4 +63,4 @@ async def test_a_user_with_no_active_budget_can_delete_anything(mock_db: MagicMo
 
     await soft_delete_budget(mock_db, budget, user)
 
-    assert budget.is_deleted is True
+    assert budget.deleted_at is not None

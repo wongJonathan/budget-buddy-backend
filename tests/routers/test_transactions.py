@@ -248,13 +248,13 @@ async def test_update_transaction_not_found(authed_client: AsyncClient, mock_db:
 async def test_delete_transaction_is_soft_delete(
     authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
-    transaction = make_transaction(is_deleted=False)
+    transaction = make_transaction()
     mock_db.scalars.return_value = make_scalars_one(transaction)
 
     response = await authed_client.delete(f"/transactions/{transaction.id}")
 
     assert response.status_code == 204
-    assert transaction.is_deleted is True
+    assert transaction.deleted_at is not None
     mock_db.delete.assert_not_called()  # the row stays; only the flag moves
     mock_db.commit.assert_awaited_once()
 

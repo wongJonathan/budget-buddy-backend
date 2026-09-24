@@ -18,14 +18,10 @@ from sqlalchemy.ext.asyncio import (
 
 import app.models  # noqa: F401  registers every model on Base.metadata
 from app.config import get_settings
-from app.database import Base, get_db_session
+from app.database import Base, CreatableModel, get_db_session
 from app.dependencies import get_current_user
 from app.main import app
-from app.models.budget import Budget
-from app.models.category import Category
 from app.models.expense import Expense
-from app.models.savings import Savings
-from app.models.transaction import Transaction
 from app.models.user import User
 from tests.factories import make_scalars_one, make_user
 
@@ -38,16 +34,18 @@ def _fake_refresh(obj: object) -> None:
     if getattr(obj, "id", None) is None:
         obj.id = uuid.uuid4()  # type: ignore[attr-defined]
 
-    if isinstance(obj, Budget):
-        if obj.is_deleted is None:
-            obj.is_deleted = False
+    if isinstance(obj, CreatableModel):
+        # `deleted_at` needs nothing: it is nullable with no default, so a fresh row's
+        # `None` is already what Postgres would hand back.
+        now = datetime.datetime.now(datetime.UTC)
         if obj.created_at is None:
-            obj.created_at = datetime.datetime.now(datetime.UTC)
-    elif isinstance(obj, Expense):
+            obj.created_at = now
+        if obj.updated_at is None:
+            obj.updated_at = now
+
+    if isinstance(obj, Expense):
         if obj.series_id is None:
             obj.series_id = uuid.uuid4()
-        if obj.is_deleted is None:
-            obj.is_deleted = False
         if obj.monthly_cost is None:
             # NOT COVERED: mocked session, see checklist.md — real value is a
             # Postgres GENERATED column, not computable here.
@@ -55,13 +53,6 @@ def _fake_refresh(obj: object) -> None:
     elif isinstance(obj, User):
         if obj.last_active is None:
             obj.last_active = datetime.date.today()
-    elif isinstance(obj, Transaction | Savings):
-        if obj.is_deleted is None:
-            obj.is_deleted = False
-        if isinstance(obj, Transaction) and obj.created_at is None:
-            obj.created_at = datetime.datetime.now(datetime.UTC)
-    elif isinstance(obj, Category):
-        pass  # no server-generated fields besides id
 
 
 def _scalars_result(items: Sequence[object]) -> MagicMock:

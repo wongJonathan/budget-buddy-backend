@@ -24,10 +24,10 @@ from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base, UUIDPrimaryKeyMixin
+from app.database import Base, CreatableModel
 
 
-class Savings(UUIDPrimaryKeyMixin, Base):
+class Savings(CreatableModel, Base):
     """Tracks the money saved for an expense.
 
     Total is determined by deriving it from all saved and spend saved transactions for a
@@ -42,4 +42,3 @@ class Savings(UUIDPrimaryKeyMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false")

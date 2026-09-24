@@ -87,7 +87,7 @@ async def test_provision_user_creates_a_blank_budget(db_session: AsyncSession) -
     stored = (await db_session.scalars(select(Budget))).one()
     assert stored.id == budget.id
     assert stored.name == DEFAULT_BUDGET_NAME
-    assert stored.is_deleted is False
+    assert stored.deleted_at is None
 
 
 async def test_provision_user_wires_the_circular_reference_both_ways(

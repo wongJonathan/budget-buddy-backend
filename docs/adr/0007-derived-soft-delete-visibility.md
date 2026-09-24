@@ -1,6 +1,6 @@
 # Soft-delete visibility is derived from ancestors, not propagated on write
 
-**Status**: accepted (amended by ADR-0011 — Transaction is no longer subject to the ancestor rule)
+**Status**: accepted (amended by ADR-0011: Transaction is no longer subject to the ancestor rule; superseded in part by ADR-0014: deleting an Expense explicitly withdraws its Period's Transactions, and deleted Transactions and Expenses are shown by default; since amended: the `is_deleted` flag below is now a nullable `deleted_at` timestamp on every soft-deleting table, and Category soft-deletes too, outside the ancestor rule)
 
 Budget, Expense, Transaction and Savings all soft-delete via an `is_deleted` flag; their `DELETE` routes set the flag and the rows stay. A row is **visible only if it and every ancestor is undeleted**, evaluated at read time through joins in `app/services/visibility.py`. Soft-deleting a Budget therefore hides its Expenses without writing to a single one of them.
 

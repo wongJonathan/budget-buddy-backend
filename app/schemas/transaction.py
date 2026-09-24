@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.enums import TransactionType
 from app.ownership import ExpenseRef, TransactionRef
+from app.schemas.base import CreatableSchema
 from app.schemas.fields import ClientTransactionType
 
 
@@ -49,7 +50,7 @@ class TransactionUpdate(BaseModel):
     transfer_id: TransactionRef | None = None
 
 
-class TransactionRead(BaseModel):
+class TransactionRead(CreatableSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -60,9 +61,7 @@ class TransactionRead(BaseModel):
     amount: Decimal
     note: str | None
     date: datetime.date
-    created_at: datetime.datetime
     transfer_id: uuid.UUID | None
-    is_deleted: bool
 
 
 class TransactionPage(BaseModel):

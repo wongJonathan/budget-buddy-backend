@@ -103,15 +103,17 @@ async def test_update_category_not_found(authed_client: AsyncClient, mock_db: Ma
     assert response.status_code == 404
 
 
-async def test_delete_category_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
+async def test_delete_category_is_soft_delete(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
     category = make_category()
     mock_db.scalars.return_value = make_scalars_one(category)
 
     response = await authed_client.delete(f"/categories/{category.id}")
 
     assert response.status_code == 204
-    # Category hard-deletes; it has no is_deleted flag. See CONTEXT.md.
-    mock_db.delete.assert_awaited_once_with(category)
+    assert category.deleted_at is not None
+    mock_db.delete.assert_not_called()
     mock_db.commit.assert_awaited_once()
 
 

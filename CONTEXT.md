@@ -12,11 +12,11 @@ Creating a User account. Always an operator action, never self-service — there
 _Avoid_: "signup", "registration" — nothing here is self-service, and the account holder is not the one who creates the account.
 
 **Budget**:
-A named collection of Expenses belonging to a User, rolled forward period by period. A Budget has no stored "active" state of its own — it is active only when `User.active_budget_id` points at it. Soft-deleted via `is_deleted`, never hard-deleted, and never while it is the active one.
+A named collection of Expenses belonging to a User, rolled forward period by period. A Budget has no stored "active" state of its own — it is active only when `User.active_budget_id` points at it. Soft-deleted via `deleted_at`, never hard-deleted, and never while it is the active one.
 _Avoid_: "active budget" as a Budget-side flag/status — activeness is always read from the User side.
 
 **Category**:
-A user-owned label applied to Expenses, and nothing more — no reserved subset, no business-logic role, no control over how the Expenses under it behave. See `docs/adr/0009`.
+A user-owned label applied to Expenses, and nothing more — no reserved subset, no business-logic role, no control over how the Expenses under it behave. Soft-deleted: a deleted Category is absent from lists, unreachable by id, and cannot be applied to a new or edited Expense, but Expenses already carrying it keep it. See `docs/adr/0009`.
 _Avoid_: "system category", "income category", "debt category" — these existed as a `system_type` hook and were removed. Sign and lineage are facts about a row, never about its label.
 
 **Expense**:
@@ -33,7 +33,7 @@ Money arriving, recorded as a Transaction with no Expense. Always observed after
 _Avoid_: "income category", "income expense" — income was once modeled as a recurring Expense and is not (`docs/adr/0009`).
 
 **Savings**:
-Money a User has set aside against one Expense lineage, and the durable identity of that lineage across Periods. Holds no stored balance — its balance is the sum of the Transactions stamped with it — and no goal of its own; the goal lives on the Expense. A balance counts money rather than visible rows, so a deleted Expense or Budget does not change it. Created the first time money is Saved against a lineage, and closed when that lineage's current-Period Expense is deleted, which returns the money to the Pool. See `docs/adr/0011`.
+Money a User has set aside against one Expense lineage, and the durable identity of that lineage across Periods. Holds no stored balance — its balance is the sum of the Transactions stamped with it — and no goal of its own; the goal lives on the Expense. A balance counts undeleted Transactions and nothing else, so hiding an Expense or Budget never changes it. Created the first time money is Saved against a lineage, closed when that lineage's current-Period Expense is deleted (which returns what it holds to the Pool), and reopened if that Expense is Restored. See `docs/adr/0011`.
 _Avoid_: "amount saved" as a figure living on an Expense — that column existed and is gone. Also avoid "SavingFund" and "envelope" as names for the entity; the entity is a Savings and what it holds is its Fund.
 
 **Fund**:
@@ -45,8 +45,13 @@ The money a User has available to allocate right now: Income received, less what
 _Avoid_: "balance", "budget" — the Pool is the User's spendable money, not a plan and not a Budget's total.
 
 **Soft delete**:
-Marking a Budget, Expense, Transaction or Savings as deleted (`is_deleted`) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses without touching them. Transaction is outside this rule — it is visible unless it is itself deleted, because it records a movement of real money rather than a line in a plan, and deleting a plan must not unspend what was spent against it. Deleted means gone: a soft-deleted row is absent from lists and unreachable by id alike. Category and User are the exceptions — they hard-delete.
+Marking a Budget, Expense, Transaction, Savings or Category as deleted (`deleted_at`, the moment of deletion) without removing the row. A row is visible only if it *and every ancestor* is undeleted, so deleting a Budget hides its Expenses without touching them. Transaction is outside this rule — whether it counts depends only on its own flag, never on an ancestor's, so hiding a Budget or an Expense never silently unspends anything. When an Expense deletion withdraws Transactions, it does so by deleting them explicitly (below). A deleted Transaction or Expense still shows, flagged as deleted, unless the reader asks for deleted rows to be hidden — but it is read-only, counts toward no total, and can never be the parent of a new row. A deleted Budget, Savings or Category is gone: absent from lists and unreachable by id alike. Category sits outside the ancestor rule in both directions — deleting one hides no Expense. User is the exception — it hard-deletes.
+Deleting an Expense withdraws it and its Period's money movements together: either the plan was a mistake, or its money belongs to a different plan. Its Transactions in that Period stop counting, its lineage ends (nothing succeeds or carries forward from it), and whatever its Savings still holds is Transferred back to the Pool before the Savings is closed. A deleted Expense can be Restored within the same Period.
 _Avoid_: "deactivated" — Expense used to call its flag `is_deactivated`, which reads like a state a user chose rather than a deletion. One word for one concept.
+
+**Restore**:
+Reversing the deletion of an Expense, possible only within the Period it was deleted in. It brings back exactly what that deletion withdrew — the Expense, its Period's Transactions that the deletion took, and its Savings — and withdraws the Transfer the deletion wrote. Transactions the User had deleted beforehand stay deleted. A Restore may leave the Pool negative, when the returned money has since been allocated elsewhere; that is an accurate picture, not an error. See `docs/adr/0014`.
+_Avoid_: "undo", "undelete" — Restore is something done to a row, and one word for one concept.
 
 **Period**:
 The real DATE marking which month an Expense instance belongs to, always the first day of that month. Drives Rollover; not a display string like "MM/YYYY". Expenses can only be created, edited or deleted in the current Period — neither ahead nor behind. Earlier Periods are a record, not a working area.
@@ -60,7 +65,7 @@ An Expense whose *Pool-drawing* Transactions for its Period total at least its `
 _Avoid_: reading Met as "money was spent on it" — it means a Period's allocation was drawn from the Pool, whether that was spent or set aside.
 
 **Rollover**:
-The scheduled job that instantiates the next Period's Expense rows from the prior one and carries unmet Expenses forward, walking month-by-month so multi-month gaps are handled like any other step. A carried Expense is an ordinary Expense with `frequency = once`, indistinguishable from one the user created; being `once` is what stops it carrying again once Met. Idempotent by recording which Periods it has processed, never by inspecting whether the target Period looks empty. See `docs/adr/0010`.
+The scheduled job that instantiates the next Period's Expense rows from the prior one and carries unmet Expenses forward, walking month-by-month so multi-month gaps are handled like any other step. A carried Expense is an ordinary Expense with `frequency = once`, indistinguishable from one the user created; being `once` is what stops it carrying again once Met. A deleted Expense ends its lineage, so Rollover neither succeeds nor carries it. Idempotent by recording which Periods it has processed, never by inspecting whether the target Period looks empty. See `docs/adr/0010`.
 _Avoid_: "debt expense" as a distinct kind of row — there is no such kind.
 
 **Activation**:

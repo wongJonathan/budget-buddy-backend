@@ -58,7 +58,7 @@ async def test_create_expense_optional_fields_default(
     assert body["note"] is None
     assert body["goal_amount"] is None
     assert body["goal_date"] is None
-    assert body["is_deleted"] is False
+    assert body["deleted_at"] is None
 
 
 async def test_get_expense_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
@@ -101,13 +101,13 @@ async def test_update_expense_not_found(authed_client: AsyncClient, mock_db: Mag
 async def test_delete_expense_is_soft_delete(
     authed_client: AsyncClient, mock_db: MagicMock
 ) -> None:
-    expense = make_expense(is_deleted=False)
+    expense = make_expense()
     mock_db.scalars.return_value = make_scalars_one(expense)
 
     response = await authed_client.delete(f"/expenses/{expense.id}")
 
     assert response.status_code == 204
-    assert expense.is_deleted is True
+    assert expense.deleted_at is not None
     mock_db.delete.assert_not_called()
     mock_db.commit.assert_awaited_once()
 

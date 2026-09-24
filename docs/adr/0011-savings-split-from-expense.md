@@ -1,6 +1,6 @@
 # Savings is a separate entity, and Met measures allocation drawn from the pool
 
-**Status**: accepted (amends ADR-0009 and ADR-0010)
+**Status**: accepted (amends ADR-0009 and ADR-0010; its "Deleting" section is extended by ADR-0014, which also withdraws the deleted Expense's Period Transactions and adds Restore)
 
 `Expense` carried both the plan (`cost`, `frequency`, `monthly_cost`) and the money set aside
 against that plan (`amount_saved`), and separately `TransactionType` already had `SAVE` and

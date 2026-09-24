@@ -65,7 +65,7 @@ async def test_deleting_a_current_period_expense_is_allowed(mock_db: MagicMock) 
 
     await soft_delete_expense(mock_db, expense)
 
-    assert expense.is_deleted is True
+    assert expense.deleted_at is not None
     mock_db.commit.assert_awaited_once()
 
 
@@ -77,7 +77,7 @@ async def test_deleting_a_closed_period_expense_is_refused(mock_db: MagicMock) -
     with pytest.raises(ClosedPeriod):
         await soft_delete_expense(mock_db, expense)
 
-    assert expense.is_deleted is False
+    assert expense.deleted_at is None
     mock_db.commit.assert_not_awaited()
 
 

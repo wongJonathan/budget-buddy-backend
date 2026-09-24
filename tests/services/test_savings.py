@@ -12,7 +12,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.budget import Budget
@@ -206,7 +206,7 @@ async def test_a_balance_survives_its_expense_being_soft_deleted(
     user, expense = await _expense(db_session)
     await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
 
-    expense.is_deleted = True
+    expense.deleted_at = func.now()
     await db_session.commit()
 
     assert await savings_service.balance(db_session, expense.savings_id) == Decimal("100.00")
@@ -222,7 +222,7 @@ async def test_a_balance_survives_its_budget_being_soft_deleted(
 
     budget = await db_session.get(Budget, expense.budget_id)
     assert budget is not None
-    budget.is_deleted = True
+    budget.deleted_at = func.now()
     await db_session.commit()
 
     assert await savings_service.balance(db_session, expense.savings_id) == Decimal("100.00")
@@ -414,7 +414,7 @@ async def test_the_fund_is_closed_not_merely_emptied(db_session: AsyncSession) -
 
     savings = await db_session.get(Savings, expense.savings_id)
     assert savings is not None
-    assert savings.is_deleted is True
+    assert savings.deleted_at is not None
 
 
 async def test_an_empty_fund_is_closed_without_a_transfer(db_session: AsyncSession) -> None:
@@ -427,7 +427,7 @@ async def test_an_empty_fund_is_closed_without_a_transfer(db_session: AsyncSessi
     await expense_service.soft_delete_expense(db_session, expense)
 
     savings = await db_session.get(Savings, expense.savings_id)
-    assert savings is not None and savings.is_deleted is True
+    assert savings is not None and savings.deleted_at is not None
     assert not [
         t for t in await _transactions(db_session, user) if t.type is TransactionType.TRANSFER
     ]
@@ -442,12 +442,16 @@ async def test_deleting_an_expense_with_no_fund_writes_nothing(
 
     await expense_service.soft_delete_expense(db_session, expense)
 
-    assert expense.is_deleted is True
+    # `deleted_at` was assigned `func.now()`, which leaves the attribute expired after
+    # the flush - `eager_defaults` doesn't fetch it back - so it has to be reloaded
+    # before a plain attribute read, or the async session raises MissingGreenlet.
+    await db_session.refresh(expense)
+    assert expense.deleted_at is not None
     assert len(await _transactions(db_session, user)) == 1
 
 
 async def test_a_closed_fund_is_not_drained_twice(db_session: AsyncSession) -> None:
-    """Idempotent through the `is_deleted` check. A second drain would invent money."""
+    """Idempotent through the `deleted_at` check. A second drain would invent money."""
     user, expense = await _expense(db_session)
     await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
     await expense_service.soft_delete_expense(db_session, expense)

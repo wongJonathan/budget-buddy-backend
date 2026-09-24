@@ -1,11 +1,12 @@
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryUpdate
+from app.services.visibility import live_categories
 
 
 async def create_category(
@@ -19,7 +20,7 @@ async def create_category(
 
 
 async def list_categories(db: AsyncSession, user: User) -> Sequence[Category]:
-    categories = await db.execute(select(Category).where(Category.user_id == user.id))
+    categories = await db.execute(live_categories().where(Category.user_id == user.id))
     return categories.scalars().all()
 
 
@@ -34,5 +35,5 @@ async def update_category(
 
 
 async def delete_category(db: AsyncSession, category: Category) -> None:
-    await db.delete(category)
+    category.deleted_at = func.now()
     await db.commit()
