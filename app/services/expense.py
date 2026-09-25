@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import AppError
+from app.exceptions import AppError, CannotRestoreNonDeletedRow
 from app.models.expense import Expense
 from app.models.user import User
 from app.ownership import verify_owned_refs
@@ -113,3 +113,20 @@ async def list_budget_expenses(
     result = await db.execute(query)
 
     return result.scalars().all()
+
+
+async def restore_expense(db: AsyncSession, expense: Expense) -> Expense:
+    _require_open_period(expense)
+    if expense.deleted_at is None:
+        raise CannotRestoreNonDeletedRow
+
+    await transaction_service.restore_transactions(db, expense)
+
+    if expense.savings_id is not None:
+        await savings_service.restore_savings(db, expense)
+
+    expense.deleted_at = None
+
+    await db.commit()
+    await db.refresh(expense)
+    return expense

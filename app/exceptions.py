@@ -19,6 +19,11 @@ class DeletedRow(AppError):
         super().__init__(f"{model.__name__} is deleted", status_code=409)
 
 
+class CannotRestoreNonDeletedRow(AppError):
+    def __init__(self) -> None:
+        super().__init__("Cannot restore a non-deleted row", status_code=409)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(_request: Request, exc: AppError) -> JSONResponse:

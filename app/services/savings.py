@@ -159,3 +159,11 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
         )
 
     savings.deleted_at = func.now()
+
+
+async def restore_savings(db: AsyncSession, expense: Expense) -> None:
+    """Restores savings that were closed from the close_savings"""
+    savings = await db.get(Savings, expense.savings_id)
+    if savings is None or savings.deleted_at != expense.deleted_at:
+        return
+    savings.deleted_at = None

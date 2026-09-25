@@ -173,8 +173,7 @@ async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) ->
 
 
 async def close_transactions(db: AsyncSession, expense: Expense) -> None:
-    """
-    Handles soft-deleting all transactions that relate to a given expense within a period.
+    """Handles soft-deleting all transactions that relate to a given expense within a period.
     Because we create a new expense per roll-over we shouldnt need to check for period
     """
 
@@ -183,4 +182,31 @@ async def close_transactions(db: AsyncSession, expense: Expense) -> None:
     )
 
     for transaction in transactions.scalars().all():
+        transaction.deleted_at = func.now()
+
+
+async def restore_transactions(db: AsyncSession, expense: Expense) -> None:
+    """Restores transactions deleted by close_transactions.
+    We only restore transactions that were deleted at the same time as the expense
+    """
+    transactions = await db.execute(
+        live_transactions(include_deleted=True).where(
+            Transaction.expense_id == expense.id,
+            Transaction.deleted_at == expense.deleted_at,
+        )
+    )
+
+    # Soft-delete the transfer from savings
+    transfer_transactions = await db.execute(
+        live_transactions().where(
+            Transaction.created_at == expense.deleted_at,
+            Transaction.type == TransactionType.TRANSFER,
+            Transaction.user_id == expense.user_id,
+        )
+    )
+
+    for transaction in transactions.scalars().all():
+        transaction.deleted_at = None
+
+    for transaction in transfer_transactions.scalars().all():
         transaction.deleted_at = func.now()

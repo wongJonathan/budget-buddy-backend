@@ -32,21 +32,14 @@ async def create_bulk_expenses(
     await expense_service.create_bulk_expenses(db, data, user)
 
 
+@router.post("/{expense_id}/restore", response_model=ExpenseRead)
+async def restore_expense(expense: ReadableExpense, db: DbSession) -> Expense:
+    return await expense_service.restore_expense(expense=expense, db=db)
+
+
 @router.get("/{expense_id}", response_model=ExpenseRead)
 async def get_expense(expense: ReadableExpense) -> Expense:
     return expense
-
-
-@router.patch("/{expense_id}", response_model=ExpenseRead)
-async def update_expense(
-    expense: WritableExpense, data: ExpenseUpdate, db: DbSession
-) -> Expense:
-    return await expense_service.update_expense(db, expense, data)
-
-
-@router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_expense(expense: WritableExpense, db: DbSession) -> None:
-    await expense_service.soft_delete_expense(db, expense)
 
 
 @budget_expenses_router.get("/expenses", response_model=list[ExpenseRead])
@@ -59,3 +52,15 @@ async def list_budget_expenses(
     return await expense_service.list_budget_expenses(
         db, budget.id, period or current_period(), include_deleted
     )
+
+
+@router.patch("/{expense_id}", response_model=ExpenseRead)
+async def update_expense(
+    expense: WritableExpense, data: ExpenseUpdate, db: DbSession
+) -> Expense:
+    return await expense_service.update_expense(db, expense, data)
+
+
+@router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_expense(expense: WritableExpense, db: DbSession) -> None:
+    await expense_service.soft_delete_expense(db, expense)
