@@ -1,25 +1,23 @@
 """Savings funds, and the balances derived from the ledger.
 
-A fund stores no balance. It is the sum of the Transactions stamped with its
-`savings_id`, which is what stops the number drifting the way `Expense.amount_saved`
-did - there is no second copy to forget to update in a write path.
+A fund stores no balance. It is the sum of the Transactions whose `savings_id` names
+it, which is what stops the number drifting the way `Expense.amount_saved` did - there
+is no second copy to forget to update in a write path.
 
     fund(S) = SAVE - SPEND_SAVED - TRANSFER
 
-`TRANSFER` appears once, not twice: only the fund side of a transfer pair is stamped, so
-the Pool side lands in the Pool sum instead. `INCOME` and `SPEND` never touch a fund and
-are never stamped.
+`TRANSFER` appears once, not twice: only the fund side of a transfer pair has an Expense,
+so the Pool side lands in the Pool sum instead. `INCOME` and `SPEND` never touch a fund.
 
-The sum reads `Transaction.savings_id` rather than joining out to `expenses.savings_id`:
-those answer different questions - which fund the money went into, versus which fund the
-lineage feeds now - and only the first is a fact about the past. See the note on the
-Transaction model.
+`Transaction.savings_id` is derived through the Transaction's Expense (docs/adr/0015),
+so a fund is reached through whichever Expense rows point at it - every Period of the
+lineage, since Rollover carries the id forward.
 
 Performance is not a reason to cache this. A decade of heavy use is tens of thousands of
-Transactions for an entire account, and the sum below is filtered by an indexed
-`savings_id`. What derivation genuinely costs is the inability to write "a fund never
-goes negative" as a CHECK - the invariant spans rows - which is why `spendable` exists
-and why the split reads it inside the write transaction rather than trusting a column.
+Transactions for an entire account. What derivation genuinely costs is the inability to
+write "a fund never goes negative" as a CHECK - the invariant spans rows - which is why
+`spendable` exists and why the split reads it inside the write transaction rather than
+trusting a column.
 
 See docs/adr/0011.
 """
@@ -105,8 +103,8 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
     and predates the decision to stop planning for it, so it goes back to the Pool as a
     `TRANSFER` pair rather than evaporating:
 
-        row 1  expense_id + savings_id set   -> the fund side, reduces the balance
-        row 2  both null, transfer_id -> row 1 -> the Pool side, increases the Pool
+        row 1  expense_id set                  -> the fund side, reduces the balance
+        row 2  no expense, transfer_id -> row 1 -> the Pool side, increases the Pool
 
     Direction is readable off those columns, so `transfer_id` carries no meaning beyond
     pairing the two. Both rows are written here rather than by a client, because a
@@ -134,7 +132,6 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
         today = datetime.datetime.now(datetime.UTC).date()
         out_of_fund = Transaction(
             expense_id=expense.id,
-            savings_id=savings.id,
             user_id=expense.user_id,
             type=TransactionType.TRANSFER,
             name=f"Closed savings for {expense.name}",
@@ -148,7 +145,6 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
         db.add(
             Transaction(
                 expense_id=None,
-                savings_id=None,
                 user_id=expense.user_id,
                 type=TransactionType.TRANSFER,
                 name=f"Returned from {expense.name} savings",

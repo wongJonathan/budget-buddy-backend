@@ -18,13 +18,15 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.enums import TransactionType
-from app.ownership import ExpenseRef, TransactionRef
+from app.ownership import CategoryRef, ExpenseRef, SavingsRef, TransactionRef
 from app.schemas.base import CreatableSchema
 from app.schemas.fields import ClientTransactionType
 
 
 class TransactionCreate(BaseModel):
+    # `category_id` and `savings_id` are derived from this
     expense_id: ExpenseRef | None = None
+
     type: ClientTransactionType
     name: str
     amount: Decimal
@@ -33,15 +35,17 @@ class TransactionCreate(BaseModel):
     transfer_id: TransactionRef | None = None
 
     @model_validator(mode="after")
-    def _save_needs_an_expense(self) -> TransactionCreate:
-        """A fund belongs to an Expense lineage, so there is nowhere for a bare Save to
-        go - and `open_savings` would have no row to stamp the new `savings_id` on."""
-        if self.type is TransactionType.SAVE and self.expense_id is None:
-            raise ValueError("a save must name the expense whose savings it funds")
+    def _only_income_can_have_no_expense(self) -> TransactionCreate:
+        if self.type is not TransactionType.INCOME and self.expense_id is None:
+            raise ValueError(
+                "A linked expense is required for every transaction type except Income"
+            )
         return self
 
 
 class TransactionUpdate(BaseModel):
+    expense_id: ExpenseRef | None = None
+
     type: ClientTransactionType | None = None
     name: str | None = None
     amount: Decimal | None = None
@@ -52,10 +56,11 @@ class TransactionUpdate(BaseModel):
 
 class TransactionRead(CreatableSchema):
     model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     expense_id: uuid.UUID | None
+    category_id: uuid.UUID | None
     savings_id: uuid.UUID | None
+
     type: TransactionType
     name: str
     amount: Decimal

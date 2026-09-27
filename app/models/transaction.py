@@ -2,12 +2,13 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Numeric
+from sqlalchemy import Date, ForeignKey, Index, Numeric, case, select
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
 from app.database import Base, CreatableModel
 from app.models.enums import TransactionType, pg_enum
+from app.models.expense import Expense
 
 
 class Transaction(CreatableModel, Base):
@@ -24,24 +25,32 @@ class Transaction(CreatableModel, Base):
         ForeignKey("expenses.id", ondelete="CASCADE"),
         default=None,
     )
-    # Which fund this money moved, recorded here rather than derived through
-    # `expense_id -> Expense.savings_id`. Not a duplicate of that column: this is the
-    # fund the money *went into*, a historical fact that must never change, while
-    # `Expense.savings_id` is the fund a lineage *currently funds* and is re-pointable
-    # once Activation takes a reallocation map. Deriving it would rewrite history the
-    # moment a lineage was re-pointed, and would also make a balance depend on whether
-    # the Expense happened to be soft-deleted. See docs/adr/0011.
-    #
-    # Non-null on exactly the rows that move a fund - SAVE, SPEND_SAVED, and the fund
-    # side of a TRANSFER pair. Null on SPEND, INCOME and a transfer's Pool side.
-    savings_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("savings.id", ondelete="SET NULL"),
-        default=None,
-        index=True,
+    category_id: Mapped[uuid.UUID | None] = column_property(
+        select(Expense.category_id)
+        .where(Expense.id == expense_id)
+        .correlate_except(Expense)
+        .scalar_subquery()
     )
     type: Mapped[TransactionType] = mapped_column(
         pg_enum(TransactionType, "transaction_type")
+    )
+    savings_id: Mapped[uuid.UUID | None] = column_property(
+        case(
+            (
+                type.in_(
+                    [
+                        TransactionType.SAVE,
+                        TransactionType.SPEND_SAVED,
+                        TransactionType.TRANSFER,
+                    ]
+                ),
+                select(Expense.savings_id)
+                .where(Expense.id == expense_id)
+                .correlate_except(Expense)
+                .scalar_subquery(),
+            ),
+            else_=None,
+        )
     )
     name: Mapped[str] = mapped_column()
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))

@@ -1,4 +1,5 @@
 import datetime
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -37,6 +38,7 @@ async def list_transactions(
     db: DbSession,
     date_from: datetime.date | None = None,
     date_to: datetime.date | None = None,
+    category_id: uuid.UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> TransactionPage:
@@ -47,6 +49,7 @@ async def list_transactions(
         date_to=date_to or last_of_month(current_period()),
         limit=limit,
         offset=offset,
+        category_id=category_id,
     )
     return TransactionPage(
         items=[TransactionRead.model_validate(item) for item in items],

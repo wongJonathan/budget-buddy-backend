@@ -23,7 +23,8 @@ from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.fields import current_period
-from app.schemas.transaction import TransactionCreate
+from app.schemas.transaction import TransactionCreate, TransactionUpdate
+from app.services import budget as budget_service
 from app.services import expense as expense_service
 from app.services import savings as savings_service
 from app.services import transaction as transaction_service
@@ -160,11 +161,11 @@ async def test_a_fund_belongs_to_the_lineage_not_one_period(db_session: AsyncSes
     assert await savings_service.balance(db_session, expense.savings_id) == Decimal("200.00")
 
 
-async def test_the_fund_is_stamped_on_the_movements_that_move_it(
+async def test_the_fund_is_derived_only_for_the_movements_that_move_it(
     db_session: AsyncSession,
 ) -> None:
     """`savings_id` is non-null on exactly the rows that move a fund. The Pool half of a
-    split carries none, which is the invariant the balance sum relies on."""
+    split shares the Expense but reads none - the type gate, not the Expense, decides."""
     user, expense = await _expense(db_session)
     (saved,) = await _post(db_session, user, expense, TransactionType.SAVE, "30.00")
     rows = await _post(db_session, user, expense, TransactionType.SPEND, "50.00")
@@ -175,7 +176,7 @@ async def test_the_fund_is_stamped_on_the_movements_that_move_it(
     assert by_type[TransactionType.SPEND].savings_id is None
 
 
-async def test_a_plain_spend_is_never_stamped(db_session: AsyncSession) -> None:
+async def test_a_plain_spend_has_no_fund(db_session: AsyncSession) -> None:
     """It drew on the Pool, not a fund - so it must not appear in any balance."""
     user, expense = await _expense(db_session)
 
@@ -184,7 +185,7 @@ async def test_a_plain_spend_is_never_stamped(db_session: AsyncSession) -> None:
     assert spend.savings_id is None
 
 
-async def test_income_is_never_stamped(db_session: AsyncSession) -> None:
+async def test_income_has_no_fund(db_session: AsyncSession) -> None:
     user, _ = await _expense(db_session)
 
     (income,) = await _post(db_session, user, None, TransactionType.INCOME, "2000.00")
@@ -200,9 +201,9 @@ async def test_income_is_never_stamped(db_session: AsyncSession) -> None:
 async def test_a_balance_survives_its_expense_being_soft_deleted(
     db_session: AsyncSession,
 ) -> None:
-    """The reason the fund is recorded on the Transaction rather than derived through
-    the Expense. Deriving it made this read zero while the money was still real -
-    a silent revaluation rather than a hidden row."""
+    """The derivation reads the Expense but ignores its `deleted_at`. Filtering on it
+    would read zero while the money was still real - a silent revaluation rather than a
+    hidden row."""
     user, expense = await _expense(db_session)
     await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
 
@@ -228,24 +229,49 @@ async def test_a_balance_survives_its_budget_being_soft_deleted(
     assert await savings_service.balance(db_session, expense.savings_id) == Decimal("100.00")
 
 
-async def test_repointing_a_lineage_leaves_history_where_it_happened(
+async def test_moving_a_save_to_another_expense_moves_it_to_that_fund(
     db_session: AsyncSession,
 ) -> None:
-    """What the reallocation map will do one day. The old fund keeps the money that went
-    into it; deriving through `Expense.savings_id` would have moved all of it to the new
-    fund and emptied the old one."""
-    user, expense = await _expense(db_session)
-    await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
-    original = expense.savings_id
+    """The fund follows the Expense, the way the Category does. Users assign a
+    Transaction to an Expense, never to a fund, so correcting the Expense corrects the
+    fund - including opening one when the new Expense has none yet."""
+    user, a = await _expense(db_session)
+    b = Expense(
+        budget_id=a.budget_id,
+        category_id=a.category_id,
+        user_id=user.id,
+        name="Holiday",
+        cost=Decimal("100.00"),
+        frequency=Frequency.MONTHLY,
+        period=current_period(),
+    )
+    db_session.add(b)
+    await db_session.commit()
+    (saved,) = await _post(db_session, user, a, TransactionType.SAVE, "100.00")
+    fund_a = a.savings_id
+    assert fund_a is not None
 
-    replacement = Savings(user_id=user.id)
-    db_session.add(replacement)
-    await db_session.flush()
-    expense.savings_id = replacement.id
+    await transaction_service.update_transaction(
+        db_session, saved, TransactionUpdate(expense_id=b.id), user
+    )
+    await db_session.refresh(b)
+
+    assert b.savings_id is not None
+    assert saved.savings_id == b.savings_id
+    assert await savings_service.balance(db_session, b.savings_id) == Decimal("100.00")
+    assert await savings_service.balance(db_session, fund_a) == Decimal(0)
+
+
+async def test_imported_savings_count_toward_the_fund(db_session: AsyncSession) -> None:
+    """The import writes its SAVE without naming a fund. While the fund was stored on
+    the Transaction that left the balance at zero; derived, it reads the Expense's."""
+    user, expense = await _expense(db_session)
+
+    await budget_service._import_amount_saved(db_session, expense, Decimal("75.00"), user)
     await db_session.commit()
 
-    assert await savings_service.balance(db_session, original) == Decimal("100.00")
-    assert await savings_service.balance(db_session, replacement.id) == Decimal(0)
+    assert expense.savings_id is not None
+    assert await savings_service.balance(db_session, expense.savings_id) == Decimal("75.00")
 
 
 # ---------------------------------------------------------------------------

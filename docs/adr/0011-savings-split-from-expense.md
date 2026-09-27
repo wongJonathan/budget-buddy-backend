@@ -1,6 +1,6 @@
 # Savings is a separate entity, and Met measures allocation drawn from the pool
 
-**Status**: accepted (amends ADR-0009 and ADR-0010; its "Deleting" section is extended by ADR-0014, which also withdraws the deleted Expense's Period Transactions and adds Restore)
+**Status**: accepted, one section superseded by ADR-0015 (amends ADR-0009 and ADR-0010; its "Deleting" section is extended by ADR-0014, which also withdraws the deleted Expense's Period Transactions and adds Restore)
 
 `Expense` carried both the plan (`cost`, `frequency`, `monthly_cost`) and the money set aside
 against that plan (`amount_saved`), and separately `TransactionType` already had `SAVE` and
@@ -61,6 +61,9 @@ Each transaction type moves exactly one pair of these:
 | `TRANSFER`    | −A  | +A   | no                |
 
 ### Which fund a Transaction moved is recorded, not derived
+
+> **Superseded by ADR-0015.** `transactions.savings_id` is now derived through `expense_id`. The
+> reasoning below is kept for when Activation's reallocation map is designed.
 
 `transactions.savings_id` and `expenses.savings_id` both exist and are **not duplicates**:
 

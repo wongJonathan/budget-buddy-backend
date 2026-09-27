@@ -47,12 +47,11 @@ async def create_transaction(
         else None
     )
 
+    # @TODO: might need to implement the transfer and update
     if expense is not None and data.type is TransactionType.SAVE:
         # A fund exists because money went into it, never because an Expense was created.
-        savings = await savings_service.open_savings(db, expense, user)
-        rows = [
-            Transaction(**data.model_dump(), user_id=user.id, savings_id=savings.id)
-        ]
+        await savings_service.open_savings(db, expense, user)
+        rows = [Transaction(**data.model_dump(), user_id=user.id)]
     elif expense is not None and data.type is TransactionType.SPEND:
         rows = await _split_spend(db, user, data, expense)
     else:
@@ -85,16 +84,27 @@ async def _split_spend(
     fields = data.model_dump()
     rows = [
         Transaction(
-            **{**fields, "type": TransactionType.SPEND_SAVED, "amount": from_pot},
+            **{
+                **fields,
+                "type": TransactionType.SPEND_SAVED,
+                "amount": from_pot,
+                "note": f"Amount taken from saved.\n{data.note}",
+            },
             user_id=user.id,
-            # Stamped on the fund half only. The Pool half below carries no `savings_id`
-            # because it moved no fund - the invariant the balance sum relies on.
-            savings_id=expense.savings_id,
         )
     ]
     remainder = data.amount - from_pot
     if remainder > Decimal(0):
-        rows.append(Transaction(**{**fields, "amount": remainder}, user_id=user.id))
+        rows.append(
+            Transaction(
+                **{
+                    **fields,
+                    "amount": remainder,
+                    "note": f"Amount effecting spent.\n{data.note}",
+                },
+                user_id=user.id,
+            )
+        )
     return rows
 
 
@@ -131,6 +141,7 @@ async def list_transactions(
     date_to: datetime.date,
     limit: int,
     offset: int,
+    category_id: uuid.UUID | None = None,
 ) -> tuple[Sequence[Transaction], int]:
     if date_from > date_to:
         raise InvalidDateRange(date_from, date_to)
@@ -140,6 +151,8 @@ async def list_transactions(
         Transaction.date >= date_from,
         Transaction.date <= date_to,
     )
+    if category_id is not None:
+        window = window.where(Transaction.category_id == category_id)
 
     total = await db.scalar(select(func.count()).select_from(window.subquery()))
 
@@ -162,6 +175,12 @@ async def update_transaction(
     await verify_owned_refs(db, data, user)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(transaction, field, value)
+
+    # `savings_id` follows the Expense, so a SAVE moved onto an Expense with no fund yet
+    # would count against the Pool and land in no balance. Open one, as create does.
+    if transaction.type is TransactionType.SAVE and transaction.expense_id is not None:
+        expense = await require_owned(db, Expense, transaction.expense_id, user)
+        await savings_service.open_savings(db, expense, user)
     await db.commit()
     await db.refresh(transaction)
     return transaction

@@ -47,6 +47,7 @@ from app.exceptions import AppError, DeletedRow
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.services.visibility import (
@@ -83,6 +84,7 @@ BudgetRef = Annotated[uuid.UUID, Owned(Budget)]
 CategoryRef = Annotated[uuid.UUID, Owned(Category)]
 ExpenseRef = Annotated[uuid.UUID, Owned(Expense)]
 TransactionRef = Annotated[uuid.UUID, Owned(Transaction)]
+SavingsRef = Annotated[uuid.UUID, Owned(Savings)]
 
 
 class _LiveSelect(Protocol):
