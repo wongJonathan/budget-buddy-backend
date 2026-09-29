@@ -24,11 +24,13 @@ See docs/adr/0011.
 
 import datetime
 import uuid
+from collections.abc import Iterable
 from decimal import Decimal
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import AppError
 from app.models.enums import TransactionType
 from app.models.expense import Expense
 from app.models.savings import Savings
@@ -63,6 +65,32 @@ async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
         .where(visible.c.savings_id == savings_id)
     )
     return Decimal(await db.scalar(query) or 0)
+
+
+class FundOverdrawn(AppError):
+    def __init__(self, shortfall: Decimal, reason: str, *, status_code: int) -> None:
+        super().__init__(
+            f"this would leave a savings fund {shortfall} below zero: {reason}",
+            status_code=status_code,
+        )
+
+
+async def balances(
+    db: AsyncSession, savings_ids: Iterable[uuid.UUID | None]
+) -> dict[uuid.UUID, Decimal]:
+    """Each fund's balance, taken before a change so `shortfall` can compare."""
+    return {sid: await balance(db, sid) for sid in set(savings_ids) if sid is not None}
+
+
+async def shortfall(
+    db: AsyncSession, before: dict[uuid.UUID, Decimal]
+) -> Decimal | None:
+    worst: Decimal | None = None
+    for savings_id, was in before.items():
+        now = await balance(db, savings_id)
+        if now < 0 and now < was and (worst is None or -now > worst):
+            worst = -now
+    return worst
 
 
 async def spendable(db: AsyncSession, expense: Expense) -> Decimal:
@@ -103,11 +131,12 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
     and predates the decision to stop planning for it, so it goes back to the Pool as a
     `TRANSFER` pair rather than evaporating:
 
-        row 1  expense_id set                  -> the fund side, reduces the balance
-        row 2  no expense, transfer_id -> row 1 -> the Pool side, increases the Pool
+        row 1  expense_id set, transfer_id -> row 1  -> the fund side, reduces the balance
+        row 2  no expense,     transfer_id -> row 1  -> the Pool side, increases the Pool
 
-    Direction is readable off those columns, so `transfer_id` carries no meaning beyond
-    pairing the two. Both rows are written here rather than by a client, because a
+    The same shape as a Transfer a User asks for (docs/adr/0016), so the pair is one
+    group. Direction is readable off `expense_id`, so `transfer_id` carries no meaning
+    beyond grouping the two. Both rows are written here rather than by a client, because a
     half-written pair is money that exists on one side of a transfer and not the other -
     a state no read path could detect.
 
@@ -139,9 +168,9 @@ async def close_savings(db: AsyncSession, expense: Expense) -> None:
             date=today,
         )
         db.add(out_of_fund)
-        # Flushed so the Pool side has an id to point at: one row must exist before the
-        # other can reference it, which is what makes the pair's order inherent.
+        # Flushed for its id, which the database generates: both rows point at it.
         await db.flush()
+        out_of_fund.transfer_id = out_of_fund.id
         db.add(
             Transaction(
                 expense_id=None,

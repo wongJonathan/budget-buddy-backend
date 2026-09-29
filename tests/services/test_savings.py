@@ -340,9 +340,11 @@ async def test_an_emptied_fund_stops_splitting(db_session: AsyncSession) -> None
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("type_", [TransactionType.SPEND_SAVED, TransactionType.TRANSFER])
+@pytest.mark.parametrize("type_", [TransactionType.SPEND_SAVED])
 async def test_server_only_types_are_rejected_at_the_schema(type_: TransactionType) -> None:
-    """Rejected before any service runs, so there is no path that reaches the ledger."""
+    """Rejected before any service runs, so there is no path that reaches the ledger.
+
+    TRANSFER used to be here too; a User may now request one (docs/adr/0016)."""
     with pytest.raises(ValueError, match="written by the server"):
         TransactionCreate(
             expense_id=uuid.uuid4(),
@@ -438,7 +440,7 @@ async def test_deleting_the_live_expense_drains_the_fund(db_session: AsyncSessio
 
 
 async def test_the_drain_is_a_transfer_pair(db_session: AsyncSession) -> None:
-    """One row on the fund side, one on the Pool side, linked by `transfer_id`.
+    """One row on the fund side, one on the Pool side, sharing one `transfer_id`.
     Direction is readable off `expense_id`/`savings_id`, so the link carries no meaning
     beyond pairing them."""
     user, expense = await _expense(db_session)
@@ -456,7 +458,8 @@ async def test_the_drain_is_a_transfer_pair(db_session: AsyncSession) -> None:
 
     assert fund_side.expense_id == expense.id
     assert fund_side.savings_id == savings_id
-    assert fund_side.transfer_id is None
+    # Both point at the fund side, which points at itself (docs/adr/0016).
+    assert fund_side.transfer_id == fund_side.id
     assert pool_side.expense_id is None
     assert pool_side.transfer_id == fund_side.id
     assert fund_side.amount == pool_side.amount == Decimal("100.00")

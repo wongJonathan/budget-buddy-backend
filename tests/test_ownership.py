@@ -301,10 +301,10 @@ async def test_a_transaction_cannot_be_attached_to_another_users_expense(
         )
 
 
-async def test_a_transfer_cannot_point_at_another_users_transaction(
+async def test_a_transfer_cannot_go_to_another_users_expense(
     db_session: AsyncSession,
 ) -> None:
-    """The nullable reference is checked too - only when the client sets it."""
+    """The nullable destination is checked too - only when the client sets it."""
     alice, alice_budget, alice_category = await _account(db_session, "alice")
     bob, bob_budget, bob_category = await _account(db_session, "bob")
     alices_expense = await expense_service.create_expense(
@@ -313,33 +313,20 @@ async def test_a_transfer_cannot_point_at_another_users_transaction(
     bobs_expense = await expense_service.create_expense(
         db_session, _expense_payload(bob_budget, bob_category), bob
     )
-    bobs_rows = await transaction_service.create_transaction(
-        db_session,
-        bob,
-        TransactionCreate(
-            expense_id=bobs_expense.id,
-            type=TransactionType.SPEND,
-            name="Bob shop",
-            amount=Decimal("5.00"),
-            date=datetime.date.today(),
-        ),
-    )
-    (bobs_transaction,) = bobs_rows
 
-    # A `spend`, not a `transfer`: the transfer type is server-written and rejected on
-    # the way in (docs/adr/0011), but `transfer_id` is still a client-supplied reference
-    # and it is the ownership of *that* which is under test here.
-    with pytest.raises(NotOwned, match="Transaction not found"):
+    # Ownership is checked before anything about funds, so Alice's empty source is
+    # never reached - the 404 is about Bob's Expense.
+    with pytest.raises(NotOwned, match="Expense not found"):
         await transaction_service.create_transaction(
             db_session,
             alice,
             TransactionCreate(
                 expense_id=alices_expense.id,
-                type=TransactionType.SPEND,
+                to_expense_id=bobs_expense.id,
+                type=TransactionType.TRANSFER,
                 name="Alice move",
                 amount=Decimal("5.00"),
                 date=datetime.date.today(),
-                transfer_id=bobs_transaction.id,
             ),
         )
 

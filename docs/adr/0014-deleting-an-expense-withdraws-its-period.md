@@ -1,6 +1,6 @@
 # Deleting an Expense withdraws its Period's Transactions, and Restore reverses it exactly
 
-**Status**: accepted (supersedes in part ADR-0007 and ADR-0011)
+**Status**: accepted (supersedes in part ADR-0007 and ADR-0011; amended by ADR-0016, under which deleting an Expense also withdraws the Pool side of each Transfer out of it)
 
 ADR-0007 as amended made deleting an Expense hide the plan and leave its Transactions counting,
 because a Transaction records real money. That answers the wrong question for how the delete

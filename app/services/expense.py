@@ -97,7 +97,22 @@ async def soft_delete_expense(db: AsyncSession, expense: Expense) -> None:
     refuses it, which is what stops one month's tidy-up destroying a year of savings.
     """
     _require_open_period(expense)
+    before = await savings_service.balances(db, [expense.savings_id])
     await transaction_service.close_transactions(db, expense)
+    await db.flush()
+    # A safety net, not a rule users should meet. Withdrawal takes everything this
+    # Period moved in or out of the fund together (docs/adr/0016), so what is left is
+    # earlier Periods' money, which was never negative - unless an earlier Period's rows
+    # were edited afterwards. No drain can fix a negative fund, so refuse.
+    short = await savings_service.shortfall(db, before)
+    if short is not None:
+        name = expense.name  # read before the rollback expires it
+        await db.rollback()
+        raise savings_service.FundOverdrawn(
+            short,
+            f"what '{name}' has saved in earlier periods no longer covers what they spent",
+            status_code=409,
+        )
     await savings_service.close_savings(db, expense)
     expense.deleted_at = func.now()
     await db.commit()

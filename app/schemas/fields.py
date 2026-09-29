@@ -92,7 +92,7 @@ def _parse_requested_period(value: object) -> object:
     return value
 
 
-_SERVER_ONLY_TYPES = frozenset({TransactionType.SPEND_SAVED, TransactionType.TRANSFER})
+_SERVER_ONLY_TYPES = frozenset({TransactionType.SPEND_SAVED})
 
 
 def _reject_server_only(value: TransactionType) -> TransactionType:

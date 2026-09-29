@@ -4,7 +4,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from app.dependencies import CurrentUser, DbSession, ReadableTransaction, WritableTransaction
+from app.dependencies import (
+    CurrentUser,
+    DbSession,
+    ReadableTransaction,
+    WritableTransaction,
+)
 from app.models.transaction import Transaction
 from app.schemas.fields import current_period, last_of_month
 from app.schemas.transaction import (

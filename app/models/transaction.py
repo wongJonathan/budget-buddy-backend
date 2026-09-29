@@ -56,6 +56,7 @@ class Transaction(CreatableModel, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     note: Mapped[str | None] = mapped_column(default=None)
     date: Mapped[datetime.date] = mapped_column(Date)
+    # The same on every row of one Transfer: the id of its anchor
     transfer_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("transactions.id", ondelete="SET NULL"),
