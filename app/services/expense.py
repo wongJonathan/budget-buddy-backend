@@ -1,12 +1,15 @@
 import datetime
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError, CannotRestoreNonDeletedRow
+from app.models.enums import TransactionType
 from app.models.expense import Expense
+from app.models.transaction import Transaction
 from app.models.user import User
 from app.ownership import verify_owned_refs
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
@@ -128,6 +131,28 @@ async def list_budget_expenses(
     result = await db.execute(query)
 
     return result.scalars().all()
+
+
+async def allocated(
+    db: AsyncSession, expense_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, Decimal]:
+    ids = set(expense_ids)
+    totals = dict.fromkeys(ids, Decimal(0))
+    if not ids:
+        return totals
+    rows = await db.execute(
+        select(Transaction.expense_id, func.sum(Transaction.amount))
+        .where(
+            Transaction.expense_id.in_(ids),
+            Transaction.deleted_at.is_(None),
+            Transaction.type.in_([TransactionType.SAVE, TransactionType.SPEND]),
+        )
+        .group_by(Transaction.expense_id)
+    )
+    for expense_id, total in rows.tuples():
+        if expense_id is not None:
+            totals[expense_id] = total
+    return totals
 
 
 async def restore_expense(db: AsyncSession, expense: Expense) -> Expense:

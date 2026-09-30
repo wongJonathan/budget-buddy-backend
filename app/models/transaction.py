@@ -17,6 +17,7 @@ class Transaction(CreatableModel, Base):
     __tablename__ = "transactions"
     __table_args__ = (
         Index("ix_transactions_user_date_created", "user_id", "date", "created_at"),
+        Index("ix_transactions_expense_id", "expense_id"),
     )
 
     # Null expense_id indicates that it's income

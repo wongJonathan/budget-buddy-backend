@@ -71,6 +71,36 @@ async def test_get_expense_found(authed_client: AsyncClient, mock_db: MagicMock)
     assert response.json()["name"] == "Groceries"
 
 
+async def test_get_expense_carries_allocated(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """The figure itself is tested against Postgres in tests/services/test_allocated.py;
+    this only checks the route asks for it and puts it on the response."""
+    expense = make_expense()
+    mock_db.scalars.return_value = make_scalars_one(expense)
+
+    with patch(
+        "app.routers.expenses.expense_service.allocated",
+        new=AsyncMock(return_value={expense.id: Decimal("20.00")}),
+    ):
+        response = await authed_client.get(f"/expenses/{expense.id}")
+
+    assert response.status_code == 200
+    assert Decimal(response.json()["allocated"]) == Decimal("20.00")
+
+
+async def test_write_routes_do_not_carry_allocated(
+    authed_client: AsyncClient, mock_db: MagicMock
+) -> None:
+    """Only the read routes pay for the aggregate; a client refetches after a write."""
+    mock_db.scalars.return_value = make_scalars_one(make_expense())
+
+    response = await authed_client.post("/expenses", json=_expense_payload())
+
+    assert response.status_code == 201
+    assert "allocated" not in response.json()
+
+
 async def test_get_expense_not_found(authed_client: AsyncClient, mock_db: MagicMock) -> None:
     mock_db.scalars.return_value = make_scalars_one(None)
 

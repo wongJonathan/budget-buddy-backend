@@ -64,6 +64,10 @@ _Avoid_: reading it as a fixed property of the plan — it is a property of the 
 An Expense whose *Pool-drawing* Transactions for its Period total at least its `monthly_cost` — Save and Spend count, Spend Saved and Transfer do not, because that money was counted when it was saved. Measured against `monthly_cost` for every frequency: `cost` is the figure the user typed, `monthly_cost` is what a Period is measured against.
 _Avoid_: reading Met as "money was spent on it" — it means a Period's allocation was drawn from the Pool, whether that was spent or set aside.
 
+**Allocated**:
+How much of an Expense's Monthly Cost its Period has drawn from the Pool so far — the total of its undeleted Save and Spend Transactions, the same figure Met compares against Monthly Cost. Spending from a Savings adds nothing to it, because that money was Allocated when it was Saved: a £50 purchase covered £30 by Savings raises it by £20. Derived, never stored.
+_Avoid_: "spent" — it includes money Saved, not only money Spent, and a £50 purchase does not raise it by £50.
+
 **Rollover**:
 The scheduled job that instantiates the next Period's Expense rows from the prior one and carries unmet Expenses forward, walking month-by-month so multi-month gaps are handled like any other step. A carried Expense is an ordinary Expense with `frequency = once`, indistinguishable from one the user created; being `once` is what stops it carrying again once Met. A deleted Expense ends its lineage, so Rollover neither succeeds nor carries it. Idempotent by recording which Periods it has processed, never by inspecting whether the target Period looks empty. See `docs/adr/0010`.
 _Avoid_: "debt expense" as a distinct kind of row — there is no such kind.

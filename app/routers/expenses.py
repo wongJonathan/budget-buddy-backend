@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 from fastapi import APIRouter, status
 
 from app.dependencies import (
@@ -10,7 +8,12 @@ from app.dependencies import (
     WritableExpense,
 )
 from app.models.expense import Expense
-from app.schemas.expense import ExpenseCreate, ExpenseRead, ExpenseUpdate
+from app.schemas.expense import (
+    ExpenseCreate,
+    ExpenseRead,
+    ExpenseUpdate,
+    ExpenseWithAllocated,
+)
 from app.schemas.fields import RequestedPeriod, current_period
 from app.services import expense as expense_service
 
@@ -37,21 +40,37 @@ async def restore_expense(expense: ReadableExpense, db: DbSession) -> Expense:
     return await expense_service.restore_expense(expense=expense, db=db)
 
 
-@router.get("/{expense_id}", response_model=ExpenseRead)
-async def get_expense(expense: ReadableExpense) -> Expense:
-    return expense
+async def _with_allocated(
+    db: DbSession, expenses: list[Expense]
+) -> list[ExpenseWithAllocated]:
+    totals = await expense_service.allocated(db, (e.id for e in expenses))
+    return [
+        ExpenseWithAllocated.model_validate(
+            {**ExpenseRead.model_validate(e).model_dump(), "allocated": totals[e.id]}
+        )
+        for e in expenses
+    ]
 
 
-@budget_expenses_router.get("/expenses", response_model=list[ExpenseRead])
+@router.get("/{expense_id}", response_model=ExpenseWithAllocated)
+async def get_expense(
+    expense: ReadableExpense, db: DbSession
+) -> ExpenseWithAllocated:
+    [read] = await _with_allocated(db, [expense])
+    return read
+
+
+@budget_expenses_router.get("/expenses", response_model=list[ExpenseWithAllocated])
 async def list_budget_expenses(
     budget: ReadableBudget,
     db: DbSession,
     period: RequestedPeriod = None,
     include_deleted: bool = False,
-) -> Sequence[Expense]:
-    return await expense_service.list_budget_expenses(
+) -> list[ExpenseWithAllocated]:
+    expenses = await expense_service.list_budget_expenses(
         db, budget.id, period or current_period(), include_deleted
     )
+    return await _with_allocated(db, list(expenses))
 
 
 @router.patch("/{expense_id}", response_model=ExpenseRead)

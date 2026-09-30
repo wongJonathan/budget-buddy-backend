@@ -48,3 +48,7 @@ class ExpenseRead(CreatableSchema):
     goal_amount: Decimal | None
     goal_date: date | None
     period: date
+
+
+class ExpenseWithAllocated(ExpenseRead):
+    allocated: Decimal
