@@ -2,7 +2,7 @@ import datetime
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Body, Query, status
 
 from app.dependencies import (
     CurrentUser,
@@ -13,6 +13,7 @@ from app.dependencies import (
 from app.models.transaction import Transaction
 from app.schemas.fields import current_period, last_of_month
 from app.schemas.transaction import (
+    BulkTransactionCreate,
     TransactionCreate,
     TransactionPage,
     TransactionRead,
@@ -35,6 +36,17 @@ async def create_transaction(
     and spend if a savings amount is fully used)
     """
     return await transaction_service.create_transaction(db, user, data)
+
+
+@router.post(
+    "/bulk", response_model=list[TransactionRead], status_code=status.HTTP_201_CREATED
+)
+async def create_transactions(
+    user: CurrentUser,
+    data: Annotated[list[BulkTransactionCreate], Body(min_length=1, max_length=200)],
+    db: DbSession,
+) -> list[Transaction]:
+    return await transaction_service.create_transactions(db, user, data)
 
 
 @router.get("", response_model=TransactionPage)

@@ -63,6 +63,15 @@ class TransactionCreate(BaseModel):
         return self
 
 
+class BulkTransactionCreate(TransactionCreate):
+
+    @model_validator(mode="after")
+    def _no_transfers(self) -> BulkTransactionCreate:
+        if self.type is TransactionType.TRANSFER:
+            raise ValueError("a transfer cannot be created in bulk; post it on its own")
+        return self
+
+
 class TransactionUpdate(BaseModel):
     """On any row of a Transfer this edits the whole Transfer, and `expense_id` and
     `to_expense_id` mean its source and destination whichever row was PATCHed."""

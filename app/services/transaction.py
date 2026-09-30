@@ -45,6 +45,41 @@ async def create_transaction(
     db: AsyncSession, user: User, data: TransactionCreate
 ) -> list[Transaction]:
     """Write the rows one client intention implies, and return all of them."""
+    rows = await _write(db, user, data)
+    await db.commit()
+    for row in rows:
+        await db.refresh(row)
+    return rows
+
+
+class BulkItemFailed(AppError):
+    def __init__(self, index: int, cause: AppError) -> None:
+        self.index = index
+        super().__init__(
+            f"item {index}: {cause.message}", status_code=cause.status_code
+        )
+
+
+async def create_transactions(
+    db: AsyncSession, user: User, items: Sequence[TransactionCreate]
+) -> list[Transaction]:
+    rows: list[Transaction] = []
+    for index, data in enumerate(items):
+        try:
+            rows += await _write(db, user, data)
+        except AppError as e:
+            await db.rollback()
+            raise BulkItemFailed(index, e) from e
+    await db.commit()
+    for row in rows:
+        await db.refresh(row)
+    return rows
+
+
+async def _write(
+    db: AsyncSession, user: User, data: TransactionCreate
+) -> list[Transaction]:
+    """Add and flush the rows for `data`, uncommitted, so the caller owns the commit."""
     await verify_owned_refs(db, data, user)
 
     # Re-fetched rather than taken from the check above, which validates ownership
@@ -68,9 +103,9 @@ async def create_transaction(
         rows = [Transaction(**_row_fields(data), user_id=user.id)]
 
     db.add_all(rows)
-    await db.commit()
-    for row in rows:
-        await db.refresh(row)
+    # Explicit rather than left to autoflush: the next bulk item's balance read must
+    # see these rows.
+    await db.flush()
     return rows
 
 
