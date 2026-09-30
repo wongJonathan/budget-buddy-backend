@@ -192,11 +192,13 @@ async def _create_transfer(
         destination = await _endpoint(db, user, data.to_expense_id, "destination")
         await _open_destination(db, user, destination, source)
 
-    fields = data.model_dump(exclude={"expense_id", "to_expense_id", "type"})
+    fields = data.model_dump(exclude={"expense_id", "to_expense_id", "type", "name"})
     fields.update(user_id=user.id)
     # Because transfer means movement between funds (fund to pool).
     # Having it be spend save would have it count against monthly spent
-    anchor = Transaction(**fields, type=TransactionType.TRANSFER, expense_id=source.id)
+    anchor = Transaction(
+        **fields, type=TransactionType.TRANSFER, expense_id=source.id, name=data.name
+    )
     db.add(anchor)
     # Flushed for its id, which the database generates; the anchor then points at
     # itself, like every other row of the group.
@@ -209,6 +211,7 @@ async def _create_transfer(
             type=TransactionType.TRANSFER,
             expense_id=None,
             transfer_id=anchor.id,
+            name="Transfer to total",
         ),
     ]
     if destination is not None:
@@ -218,6 +221,7 @@ async def _create_transfer(
                 type=TransactionType.SAVE,
                 expense_id=destination.id,
                 transfer_id=anchor.id,
+                name=destination.name,
             )
         )
     return rows
@@ -305,7 +309,7 @@ async def _update_transfer(
                 expense_id=destination.id,
                 transfer_id=group.anchor.id,
                 user_id=user.id,
-                name=group.anchor.name,
+                name=destination.name,
                 note=group.anchor.note,
                 date=group.anchor.date,
                 amount=amount,
