@@ -30,7 +30,7 @@ from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.ownership import require_owned, verify_owned_refs
-from app.schemas.fields import current_period
+from app.schemas.fields import current_period, period_of
 from app.schemas.transaction import (
     TransactionCreate,
     TransactionGroup,
@@ -90,6 +90,8 @@ async def _write(
         if data.expense_id is not None
         else None
     )
+    if expense is not None:
+        _require_open_expense(expense)
 
     if expense is not None and data.type is TransactionType.SAVE:
         # A fund exists because money went into it, never because an Expense was created.
@@ -113,6 +115,51 @@ def _row_fields(data: TransactionCreate) -> dict[str, Any]:
     """The payload as Transaction columns. `to_expense_id` names a second row to write,
     not a column of this one."""
     return data.model_dump(exclude={"to_expense_id"})
+
+
+class ExpenseInClosedPeriod(AppError):
+    """A Transaction aimed at an Expense outside the open Period (docs/adr/0017).
+
+    422 like any other bad reference in a payload: the Expense exists and is the
+    caller's, but a movement against it would rewrite a Period that is a closed record.
+    """
+
+    def __init__(self, expense: Expense) -> None:
+        super().__init__(
+            f"'{expense.name}' belongs to a closed period "
+            f"({expense.period.isoformat()}); transactions can only be made against "
+            f"the current Period "
+            f"({current_period().isoformat()})",
+            status_code=422,
+        )
+
+
+def _require_open_expense(expense: Expense) -> None:
+    if expense.period != current_period():
+        raise ExpenseInClosedPeriod(expense)
+
+
+class RecordedInClosedPeriod(AppError):
+    """An edit or delete of a Transaction recorded in an earlier Period.
+
+    Gated on `created_at` rather than `date`: the question is when the row was
+    recorded, which no request can change (docs/adr/0013, docs/adr/0017). 409 for the
+    same reason `ClosedPeriod` is on Expense - the row exists and is the caller's.
+    """
+
+    def __init__(self, row: Transaction) -> None:
+        super().__init__(
+            f"transaction was recorded in a closed period "
+            f"({period_of(row.created_at).isoformat()}); only those recorded in the "
+            f"current one ({current_period().isoformat()}) can be edited or deleted",
+            status_code=409,
+        )
+
+
+def _require_recorded_in_open_period(rows: Sequence[Transaction]) -> None:
+    for row in rows:
+        if period_of(row.created_at) != current_period():
+            raise RecordedInClosedPeriod(row)
 
 
 class InvalidTransfer(AppError):
@@ -164,7 +211,7 @@ async def _load_group(db: AsyncSession, row: Transaction) -> TransactionGroup:
 
 
 async def _endpoint(
-    db: AsyncSession, user: User, expense_id: uuid.UUID, role: str
+    db: AsyncSession, user: User, expense_id: uuid.UUID
 ) -> Expense:
     """A source or destination: the caller's, live, and in the open Period.
 
@@ -172,8 +219,7 @@ async def _endpoint(
     touched its fund this Period by `expense_id` alone.
     """
     expense = await require_owned(db, Expense, expense_id, user)
-    if expense.period != current_period():
-        raise InvalidTransfer(f"a transfer's {role} must be in the current Period")
+    _require_open_expense(expense)
     return expense
 
 
@@ -220,11 +266,11 @@ async def _create_transfer(
     db: AsyncSession, user: User, data: TransactionCreate, source: Expense
 ) -> list[Transaction]:
     """Write the group: anchor, Pool side, and a Save if there is a destination."""
-    source = await _endpoint(db, user, source.id, "source")
+    source = await _endpoint(db, user, source.id)
     _check_amount(data.amount, await _draw_limit(db, source, Decimal(0)), source)
     destination = None
     if data.to_expense_id is not None:
-        destination = await _endpoint(db, user, data.to_expense_id, "destination")
+        destination = await _endpoint(db, user, data.to_expense_id)
         await _open_destination(db, user, destination, source)
 
     fields = data.model_dump(exclude={"expense_id", "to_expense_id", "type", "name"})
@@ -272,6 +318,7 @@ async def _update_transfer(
     the destination, which may already have spent it.
     """
     group = await _load_group(db, row)
+    _require_recorded_in_open_period(group.rows)
     changes = data.model_dump(exclude_unset=True)
 
     if "type" in changes and changes["type"] is not row.type:
@@ -288,14 +335,14 @@ async def _update_transfer(
         if changes["expense_id"] is None:
             raise InvalidTransfer("a transfer needs a source")
         if changes["expense_id"] != old_source.id:
-            source = await _endpoint(db, user, changes["expense_id"], "source")
+            source = await _endpoint(db, user, changes["expense_id"])
 
     old_destination_id = group.save.expense_id if group.save else None
     destination_id = changes.get("to_expense_id", old_destination_id)
     destination = None
     if destination_id is not None:
         destination = (
-            await _endpoint(db, user, destination_id, "destination")
+            await _endpoint(db, user, destination_id)
             if destination_id != old_destination_id
             else await require_owned(db, Expense, destination_id, user)
         )
@@ -476,6 +523,7 @@ async def update_transaction(
     await verify_owned_refs(db, data, user)
     if _in_transfer(transaction):
         return await _update_transfer(db, transaction, data, user)
+    _require_recorded_in_open_period([transaction])
 
     changes = data.model_dump(exclude_unset=True)
     # Either would write half a Transfer: one row where the group needs two or three.
@@ -485,6 +533,10 @@ async def update_transaction(
         )
     if "to_expense_id" in changes:
         raise InvalidTransfer("to_expense_id is only a transfer's destination")
+    if changes.get("expense_id") not in (None, transaction.expense_id):
+        _require_open_expense(
+            await require_owned(db, Expense, changes["expense_id"], user)
+        )
 
     for field, value in changes.items():
         setattr(transaction, field, value)
@@ -506,11 +558,13 @@ async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) ->
     out again - refused if the destination has already spent or moved that money on.
     """
     if not _in_transfer(transaction):
+        _require_recorded_in_open_period([transaction])
         transaction.deleted_at = func.now()
         await db.commit()
         return
 
     group = await _load_group(db, transaction)
+    _require_recorded_in_open_period(group.rows)
     destination = (
         await db.get(Expense, group.save.expense_id)
         if group.save and group.save.expense_id

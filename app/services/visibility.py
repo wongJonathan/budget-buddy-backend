@@ -40,6 +40,7 @@ from sqlalchemy import Select, select
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.savings import Savings
 from app.models.transaction import Transaction
 
 
@@ -72,6 +73,13 @@ def live_expenses(*, include_deleted: bool = False) -> Select[tuple[Expense]]:
     query = query.where(Budget.deleted_at.is_(None))
     if not include_deleted:
         query = query.where(Expense.deleted_at.is_(None))
+    return query
+
+
+def live_savings(*, include_deleted: bool = False) -> Select[tuple[Savings]]:
+    query = select(Savings)
+    if not include_deleted:
+        query = query.where(Savings.deleted_at.is_(None))
     return query
 
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from app.schemas.fields import current_period, last_of_month
+from app.schemas.fields import current_period, last_of_month, today
 from tests.factories import make_expense, make_scalars_one, make_transaction
 
 
@@ -17,7 +17,7 @@ def _transaction_payload(**overrides: object) -> dict[str, object]:
         "type": "spend",
         "name": "Weekly shop",
         "amount": "42.50",
-        "date": "2026-08-01",
+        "date": today().isoformat(),
     }
     payload.update(overrides)
     return payload

@@ -29,12 +29,19 @@ from app.models.expense import Expense
 from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.schemas import fields
+from app.schemas.fields import current_period, last_of_month
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 from app.services import expense as expense_service
 from app.services import savings as savings_service
 from app.services import transaction as transaction_service
 from app.services.savings import FundOverdrawn
-from app.services.transaction import InvalidTransfer, RestoreBlocked, TransferLocked
+from app.services.transaction import (
+    ExpenseInClosedPeriod,
+    InvalidTransfer,
+    RestoreBlocked,
+    TransferLocked,
+)
 from tests.services.test_savings import (
     _expense,
     _fund_from_last_period,
@@ -303,7 +310,7 @@ async def test_a_transfer_cannot_draw_on_an_earlier_periods_row(
         )
     ).one()
 
-    with pytest.raises(InvalidTransfer, match="current Period"):
+    with pytest.raises(ExpenseInClosedPeriod, match="current Period"):
         await _transfer(db_session, user, previous, None, "1.00")
 
 
@@ -629,15 +636,22 @@ async def test_shrinking_a_transfer_whose_money_was_spent_is_refused(
     await _assert_books_balance(db_session, user)
 
 
-async def test_name_note_and_date_spread_to_every_row(db_session: AsyncSession) -> None:
+async def test_name_note_and_date_spread_to_every_row(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The month's last day, so an earlier date in the open Period exists even on the
+    # 1st. The month is the real one, which `created_at` (set by Postgres) is checked
+    # against, and no real today is after it.
+    month_end = last_of_month(current_period())
+    monkeypatch.setattr(fields, "today", lambda: month_end)
     user, a, b = await _funded(db_session)
     anchor, _, save = await _transfer(db_session, user, a, b, "40.00")
-    yesterday = TODAY - datetime.timedelta(days=1)
+    earlier = month_end - datetime.timedelta(days=1)
 
-    await _edit(db_session, user, save, name="Rainy day", note="car", date=yesterday)
+    await _edit(db_session, user, save, name="Rainy day", note="car", date=earlier)
 
     assert {(t.name, t.note, t.date) for t in await _group(db_session, anchor)} == {
-        ("Rainy day", "car", yesterday)
+        ("Rainy day", "car", earlier)
     }
 
 

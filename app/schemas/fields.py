@@ -12,6 +12,10 @@ be written into the month that is current now. A row carrying today's real date
 instead still inserts happily and then fails to match `period =` comparisons, the
 `(budget_id, period, series_id)` constraint, and Rollover's exact-match reuse.
 
+`OpenPeriodDate`: a Transaction's date, which must fall in the open Period and not
+after today. A Transaction is written only into the open Period (docs/adr/0017), and a
+date outside it would put the movement into a Period whose figures are a closed record.
+
 `RequestedPeriod`: the same canonical form arriving the other way, as a list route's
 `?period=YYYY-MM`. The reads filter on `period =`, so a query value that is not the
 first of its month matches nothing and returns an empty list rather than an error -
@@ -53,13 +57,35 @@ def last_of_month(value: datetime.date) -> datetime.date:
     return value.replace(day=days)
 
 
+def today() -> datetime.date:
+    """Today on the server clock in UTC, the same clock `current_period` reads."""
+    return datetime.datetime.now(datetime.UTC).date()
+
+
 def current_period() -> datetime.date:
     """The Period that is open right now, on the server clock in UTC.
 
     UTC rather than the user's zone: the alternative needs a per-user timezone that
-    nothing stores yet, and a wrong guess moves the month boundary for everyone.
+    nothing stores yet, and a wrong guess moves the month boundary for everyone. See
+    docs/user-time-zones.md.
     """
-    return first_of_month(datetime.datetime.now(datetime.UTC).date())
+    return first_of_month(today())
+
+
+def period_of(moment: datetime.datetime) -> datetime.date:
+    """The Period a timestamp falls in, read in UTC like `current_period`."""
+    return first_of_month(moment.astimezone(datetime.UTC).date())
+
+
+def _in_open_period(value: datetime.date) -> datetime.date:
+    open_period, now = current_period(), today()
+    if not open_period <= value <= now:
+        raise ValueError(
+            f"date must be between {open_period.isoformat()} and today "
+            f"({now.isoformat()}); transactions are recorded in the current period "
+            "and never ahead of today"
+        )
+    return value
 
 
 def _to_current_period(value: datetime.date) -> datetime.date:
@@ -112,6 +138,8 @@ ClientTransactionType = Annotated[TransactionType, AfterValidator(_reject_server
 # what draft Budgets are for; backdating would let a late edit change a shortfall
 # Rollover has already acted on. See docs/adr/0010.
 CurrentPeriod = Annotated[datetime.date, AfterValidator(_to_current_period)]
+
+OpenPeriodDate = Annotated[datetime.date, AfterValidator(_in_open_period)]
 
 RequestedPeriod = Annotated[
     datetime.date | None, BeforeValidator(_parse_requested_period)

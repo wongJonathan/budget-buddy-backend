@@ -64,6 +64,8 @@ never a valid parent: creating a row that references it is refused. The owner ge
 ("restore it first"), while other Users still get 404 (ADR-0008), because ownership is checked
 first. Budget and Savings keep "deleted means gone". Budget deletion is out of scope here.
 
+**Amendment: Savings joins Transaction and Expense.** A deleted Savings is shown, flagged, rather than gone. It's reachable by id, it appears in `GET /savings` when `include_deleted=true`, and it's read-only (409 on PATCH). The list default follows the Expense list, which today hides deleted rows. Closed funds are worth seeing as history, and nothing about a closed Savings needs hiding, since its Fund is zero once `close_savings` has drained it. A User never closes a Savings directly. Deleting the lineage's Expense remains the only way to close one, so there is no `DELETE /savings`.
+
 ## Considered Options
 
 - **Leave Transactions counting on delete** (ADR-0007 as amended). Rejected because it doesn't

@@ -54,6 +54,7 @@ from app.services.visibility import (
     live_budgets,
     live_categories,
     live_expenses,
+    live_savings,
     live_transactions,
 )
 
@@ -107,6 +108,7 @@ _OWNABLE: dict[type[Any], _Ownable] = {
     Category: _Ownable(live_categories, Category.id, Category.user_id),
     Expense: _Ownable(live_expenses, Expense.id, Expense.user_id),
     Transaction: _Ownable(live_transactions, Transaction.id, Transaction.user_id),
+    Savings: _Ownable(live_savings, Savings.id, Savings.user_id),
 }
 
 

@@ -42,3 +42,4 @@ class Savings(CreatableModel, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+    note: Mapped[str | None] = mapped_column(default=None)

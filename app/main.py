@@ -6,7 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.exceptions import register_exception_handlers
-from app.routers import auth, budgets, categories, expenses, health, transactions, users
+from app.routers import (
+    auth,
+    budgets,
+    categories,
+    expenses,
+    health,
+    savings,
+    transactions,
+    users,
+)
 
 
 @asynccontextmanager
@@ -35,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(expenses.router)
     app.include_router(expenses.budget_expenses_router)
     app.include_router(transactions.router)
+    app.include_router(savings.router)
 
     return app
 

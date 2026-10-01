@@ -25,7 +25,7 @@ from app.models.enums import TransactionType
 from app.models.transaction import Transaction
 from app.ownership import ExpenseRef
 from app.schemas.base import CreatableSchema
-from app.schemas.fields import ClientTransactionType
+from app.schemas.fields import ClientTransactionType, OpenPeriodDate
 
 
 class TransactionCreate(BaseModel):
@@ -39,7 +39,7 @@ class TransactionCreate(BaseModel):
     name: str
     amount: Decimal
     note: str | None = None
-    date: datetime.date
+    date: OpenPeriodDate
 
     @model_validator(mode="after")
     def _only_income_can_have_no_expense(self) -> TransactionCreate:
@@ -83,7 +83,7 @@ class TransactionUpdate(BaseModel):
     name: str | None = None
     amount: Decimal | None = None
     note: str | None = None
-    date: datetime.date | None = None
+    date: OpenPeriodDate | None = None
 
 
 class TransactionRead(CreatableSchema):

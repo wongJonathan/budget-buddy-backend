@@ -141,22 +141,9 @@ async def test_a_fund_belongs_to_the_lineage_not_one_period(db_session: AsyncSes
     """Next Period's row points at the same fund, and its saves accumulate into it. This
     is the grain problem `amount_saved` had: a balance spans Periods, a row does not."""
     user, expense = await _expense(db_session)
+    # What Rollover leaves behind: last Period's row, saved into, sharing the savings_id.
+    await _fund_from_last_period(db_session, user, expense, "100.00")
     await _post(db_session, user, expense, TransactionType.SAVE, "100.00")
-
-    # What Rollover does: a new row for the next Period carrying the same savings_id.
-    next_period = Expense(
-        budget_id=expense.budget_id,
-        category_id=expense.category_id,
-        user_id=user.id,
-        name=expense.name,
-        cost=expense.cost,
-        frequency=Frequency.MONTHLY,
-        period=(current_period() + datetime.timedelta(days=32)).replace(day=1),
-        savings_id=expense.savings_id,
-    )
-    db_session.add(next_period)
-    await db_session.commit()
-    await _post(db_session, user, next_period, TransactionType.SAVE, "100.00")
 
     assert await savings_service.balance(db_session, expense.savings_id) == Decimal("200.00")
 
@@ -408,8 +395,15 @@ async def _fund_from_last_period(
     Deleting an Expense withdraws its own Period's Saves (docs/adr/0014), so only money
     from earlier Periods is left for the drain to move. A test about the drain needs
     that money to exist, or it passes by transferring nothing.
+
+    Written as rows rather than through the service: a closed Period is a record that
+    no route can write to any more (docs/adr/0017), so this is that record.
     """
     await db.refresh(expense)
+    savings = Savings(user_id=user.id)
+    db.add(savings)
+    await db.flush()
+    period = (expense.period - datetime.timedelta(days=1)).replace(day=1)
     previous = Expense(
         budget_id=expense.budget_id,
         category_id=expense.category_id,
@@ -417,14 +411,23 @@ async def _fund_from_last_period(
         name=expense.name,
         cost=expense.cost,
         frequency=expense.frequency,
-        period=(expense.period - datetime.timedelta(days=1)).replace(day=1),
+        period=period,
         series_id=expense.series_id,
+        savings_id=savings.id,
     )
     db.add(previous)
-    await db.commit()
-    await _post(db, user, previous, TransactionType.SAVE, amount)
-    await db.refresh(previous)
-    expense.savings_id = previous.savings_id
+    await db.flush()
+    db.add(
+        Transaction(
+            expense_id=previous.id,
+            user_id=user.id,
+            type=TransactionType.SAVE,
+            name=f"save {amount}",
+            amount=Decimal(amount),
+            date=period,
+        )
+    )
+    expense.savings_id = savings.id
     await db.commit()
 
 

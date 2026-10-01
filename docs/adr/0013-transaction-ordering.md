@@ -1,6 +1,6 @@
 # Transaction listing orders by date, then created_at, then id
 
-**Status**: accepted
+**Status**: accepted (narrowed by ADR-0017: `date` is correctable only within the current Period)
 
 `GET /transactions` returns a page of a window, so it needs a **total** order. Without one
 the planner is free to break ties differently at offset 0 and at offset 50, and a row can

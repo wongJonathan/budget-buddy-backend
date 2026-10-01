@@ -24,10 +24,11 @@ See docs/adr/0011.
 
 import datetime
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import ColumnElement, Subquery, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -36,7 +37,9 @@ from app.models.expense import Expense
 from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
-from app.services.visibility import live_transactions
+from app.schemas.fields import last_of_month
+from app.schemas.savings import SavingsUpdate
+from app.services.visibility import live_savings, live_transactions
 
 
 async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
@@ -50,21 +53,83 @@ async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
     counting through the Transaction's.
     """
     visible = live_transactions().subquery()
-    # Signed contribution of each row. One CASE so the balance is a single aggregate
-    # rather than three sums subtracted in Python; `INCOME` and `SPEND` fall through to
-    # zero because neither touches a fund.
-    delta = case(
+    query = (
+        select(func.coalesce(func.sum(_delta(visible)), Decimal(0)))
+        .select_from(visible)
+        .where(visible.c.savings_id == savings_id)
+    )
+    return Decimal(await db.scalar(query) or 0)
+
+
+def _delta(visible: Subquery) -> ColumnElement[Decimal]:
+    """Signed contribution of each row to its fund.
+
+    One CASE so a balance is a single aggregate rather than three sums subtracted in
+    Python; `INCOME` and `SPEND` fall through to zero because neither touches a fund.
+    """
+    return case(
         (visible.c.type == TransactionType.SAVE, visible.c.amount),
         (visible.c.type == TransactionType.SPEND_SAVED, -visible.c.amount),
         (visible.c.type == TransactionType.TRANSFER, -visible.c.amount),
         else_=Decimal(0),
     )
-    query = (
-        select(func.coalesce(func.sum(delta), Decimal(0)))
-        .select_from(visible)
-        .where(visible.c.savings_id == savings_id)
+
+
+@dataclass(frozen=True)
+class PeriodFund:
+    before_period: Decimal
+    period: Decimal
+
+    @property
+    def total(self) -> Decimal:
+        return self.before_period + self.period
+
+
+async def period_funds(
+    db: AsyncSession, savings_ids: Iterable[uuid.UUID], period: datetime.date
+) -> dict[uuid.UUID, PeriodFund]:
+    ids = set(savings_ids)
+    funds = dict.fromkeys(ids, PeriodFund(Decimal(0), Decimal(0)))
+    if not ids:
+        return funds
+    visible = live_transactions().subquery()
+    delta = _delta(visible)
+    rows = await db.execute(
+        select(
+            visible.c.savings_id,
+            func.sum(case((visible.c.date < period, delta), else_=Decimal(0))),
+            func.sum(case((visible.c.date >= period, delta), else_=Decimal(0))),
+        )
+        .where(
+            visible.c.savings_id.in_(ids),
+            visible.c.date <= last_of_month(period),
+        )
+        .group_by(visible.c.savings_id)
     )
-    return Decimal(await db.scalar(query) or 0)
+    for savings_id, before_period, within in rows.tuples():
+        funds[savings_id] = PeriodFund(before_period, within)
+    return funds
+
+
+async def list_savings(
+    db: AsyncSession, user: User, *, include_deleted: bool
+) -> Sequence[Savings]:
+    query = (
+        live_savings(include_deleted=include_deleted)
+        .where(Savings.user_id == user.id)
+        .order_by(Savings.created_at, Savings.id)
+    )
+    return (await db.scalars(query)).all()
+
+
+async def update_savings(
+    db: AsyncSession, savings: Savings, data: SavingsUpdate
+) -> Savings:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(savings, field, value)
+    await db.commit()
+    await db.refresh(savings)
+    return savings
 
 
 class FundOverdrawn(AppError):

@@ -10,6 +10,7 @@ from app.database import get_db_session
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.savings import Savings
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.ownership import require_owned
@@ -86,6 +87,9 @@ ReadableTransaction = Annotated[
 ReadableCategory = Annotated[
     Category, Depends(owned_path(Category, "category_id", allow_deleted=True))
 ]
+ReadableSavings = Annotated[
+    Savings, Depends(owned_path(Savings, "savings_id", allow_deleted=True))
+]
 
 # Writable: the caller's live row; a deleted one is a 409. For PATCH and DELETE.
 WritableBudget = Annotated[Budget, Depends(owned_path(Budget, "budget_id"))]
@@ -94,3 +98,4 @@ WritableTransaction = Annotated[
     Transaction, Depends(owned_path(Transaction, "transaction_id"))
 ]
 WritableCategory = Annotated[Category, Depends(owned_path(Category, "category_id"))]
+WritableSavings = Annotated[Savings, Depends(owned_path(Savings, "savings_id"))]
