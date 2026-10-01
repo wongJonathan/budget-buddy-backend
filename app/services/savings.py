@@ -56,9 +56,16 @@ async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
     query = (
         select(func.coalesce(func.sum(_delta(visible)), Decimal(0)))
         .select_from(visible)
-        .where(visible.c.savings_id == savings_id)
+        .where(
+            visible.c.user_id == _owner(savings_id),
+            visible.c.savings_id == savings_id,
+        )
     )
     return Decimal(await db.scalar(query) or 0)
+
+
+def _owner(savings_id: uuid.UUID) -> ColumnElement[uuid.UUID]:
+    return select(Savings.user_id).where(Savings.id == savings_id).scalar_subquery()
 
 
 def _delta(visible: Subquery) -> ColumnElement[Decimal]:
@@ -101,6 +108,8 @@ async def period_funds(
             func.sum(case((visible.c.date >= period, delta), else_=Decimal(0))),
         )
         .where(
+            # Same reason as `_owner`: without it the scan covers every User.
+            visible.c.user_id.in_(select(Savings.user_id).where(Savings.id.in_(ids))),
             visible.c.savings_id.in_(ids),
             visible.c.date <= last_of_month(period),
         )
