@@ -43,15 +43,6 @@ from app.services.visibility import live_savings, live_transactions
 
 
 async def balance(db: AsyncSession, savings_id: uuid.UUID) -> Decimal:
-    """What the savings fund holds right now.
-
-    Built on `live_transactions`, like every other read. That was briefly impossible:
-    while Transaction was subject to the ancestor rule, a soft-deleted Expense hid its
-    own SAVE rows and the fund quietly read zero, so this had to filter the deleted flag
-    for itself. ADR-0007 as amended took Transaction out of that rule and the special
-    case went with it - a fund ends through its own `deleted_at`, and a movement stops
-    counting through the Transaction's.
-    """
     visible = live_transactions().subquery()
     query = (
         select(func.coalesce(func.sum(_delta(visible)), Decimal(0)))

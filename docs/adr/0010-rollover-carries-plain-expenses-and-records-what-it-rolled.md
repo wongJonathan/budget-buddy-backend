@@ -17,6 +17,18 @@ A carried Expense is an ordinary Expense with `frequency = once` and **no marker
 paid, soft-deletes and reports exactly like any other row, because it is one. Its
 `frequency = once` is what stops it carrying forever: once met, it does not roll again.
 
+> **Amended**: a Carried Expense is named `DEBT {name}` (no second prefix if the source's name
+> already starts with `DEBT `), noted "Amount not met from last month", and costs the
+> Shortfall. Its `goal_amount`/`goal_date` are null and it copies the source's `savings_id`
+> (ADR-0018). The name and note are cosmetic and User-editable: **no code may branch on
+> them**, and that is the sense in which there is still no marker. Re-carrying an unmet
+> carry checks only the prefix, and only to avoid `DEBT DEBT`.
+>
+> **Open**: an Expense whose Category has been deleted is skipped (no successor, no carry). If
+> it is funded, its Savings is left with no current-Period Expense and can never be closed.
+> Draining it to the Pool, like ending any other lineage, is the likely answer, but this is not
+> yet decided or tested.
+
 Idempotency comes from a record of which `(budget_id, period)` pairs Rollover has already
 processed, not from checking whether the target Period looks empty.
 

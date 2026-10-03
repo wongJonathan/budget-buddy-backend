@@ -1,6 +1,15 @@
 # Rollover walks forward from the latest period, keyed by series_id
 
-**Status**: accepted
+**Status**: accepted (starting point amended below)
+
+> **Amended**: the walk starts from the latest Period recorded in `rolled_periods` for the
+> Budget, and only falls back to the latest Expense Period *strictly before* the target when
+> the Budget has never been rolled. `MAX(period)` alone reads a proxy: a user who adds an
+> Expense in the new month before a late job runs makes `MAX(period)` the target, and the
+> previous month is never rolled. This is the same reasoning ADR-0010 applies to idempotency.
+> A `custom` Expense gets no successor once its Period has passed `goal_date`. Past it,
+> `monthly_cost` divides by `GREATEST(..., 1)` and would bill the whole `cost` every month.
+> Its last Shortfall still carries.
 
 Every active Budget needs its Expense rows instantiated for the current Period, whether the user last opened the app yesterday (exact match already exists) or three months ago (multiple periods missing), and whether the Budget was just activated for the first time (no periods exist yet).
 
