@@ -39,7 +39,7 @@ def _copy_expense(expense: Expense, **overrides: Any) -> Expense:
     return Expense(**(fields | overrides))
 
 
-async def rollover(db: AsyncSession, user: User, *, through: datetime.date) -> None:
+async def rollover(db: AsyncSession, user: User, through: datetime.date) -> None:
     """Roll `user`'s active Budget forward one Period at a time, up to and including
     `through`, all in one DB transaction.
 

@@ -12,6 +12,7 @@ from app.routers import (
     categories,
     expenses,
     health,
+    rollover,
     savings,
     transactions,
     users,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(expenses.budget_expenses_router)
     app.include_router(transactions.router)
     app.include_router(savings.router)
+    app.include_router(rollover.router)
 
     return app
 
