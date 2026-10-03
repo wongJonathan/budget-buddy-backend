@@ -1,6 +1,6 @@
-import datetime
+import zoneinfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.budget import Budget
@@ -51,11 +51,19 @@ async def delete_user(
     await db.commit()
 
 
-async def update_user_last_active(
-    db: AsyncSession,
-    user: User,
-) -> User:
-    user.last_active = datetime.date.today()
+def _is_time_zone(name: str) -> bool:
+    try:
+        zoneinfo.ZoneInfo(name)
+    except zoneinfo.ZoneInfoNotFoundError, ValueError:
+        # ValueError covers names that aren't even shaped like a key ("../etc", "").
+        return False
+    return True
+
+
+async def record_activity(db: AsyncSession, user: User, time_zone: str | None) -> User:
+    user.last_active_at = func.now()
+    if time_zone is not None and _is_time_zone(time_zone):
+        user.time_zone = time_zone
     await db.commit()
     await db.refresh(user)
     return user

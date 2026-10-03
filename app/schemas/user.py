@@ -19,7 +19,7 @@ class UserRead(BaseModel):
     id: uuid.UUID
     display_name: str
     active_budget_id: uuid.UUID | None
-    last_active: datetime.date
+    last_active_at: datetime.datetime
 
 
 class UserWithBudgetsRead(UserRead):

@@ -30,8 +30,3 @@ async def update_user(user: CurrentUser, data: UserUpdate, db: DbSession) -> Use
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user: CurrentUser, db: DbSession) -> None:
     await user_service.delete_user(db, user)
-
-
-@router.patch("/last-active", response_model=UserRead)
-async def update_last_active(user: CurrentUser, db: DbSession) -> User:
-    return await user_service.update_user_last_active(db, user)

@@ -51,8 +51,8 @@ def _fake_refresh(obj: object) -> None:
             # Postgres GENERATED column, not computable here.
             obj.monthly_cost = obj.cost
     elif isinstance(obj, User):
-        if obj.last_active is None:
-            obj.last_active = datetime.date.today()
+        if obj.last_active_at is None:
+            obj.last_active_at = datetime.datetime.now(datetime.UTC)
 
 
 def _scalars_result(items: Sequence[object]) -> MagicMock:

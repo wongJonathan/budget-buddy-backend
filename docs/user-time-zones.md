@@ -13,7 +13,7 @@ The window is a few hours at each month boundary, plus the "future" edge every d
 
 ## The intended fix
 
-Give `User` a time zone (an IANA name such as `America/New_York`, captured at Provisioning and editable by its owner), and compute "today" and the current Period from it instead of from UTC:
+`User.time_zone` now exists: the IANA name (such as `America/New_York`) that the User's device last reported on login or `/me` (ADR-0019). Nothing reads it yet. What remains is to compute "today" and the current Period from it instead of from UTC:
 
 - `current_period()` takes the User, or their time zone. It's called from schema validators (`CurrentPeriod`), services and guards, so every call site needs the User in scope. Most already have it through `CurrentUser`.
 - The ADR-0017 edit gate truncates `created_at` in the User's time zone, not UTC.

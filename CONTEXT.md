@@ -11,6 +11,13 @@ An individual account holder. Owns Budgets and Categories, and points at the one
 Creating a User account. Always an operator action, never self-service — there is no registration and no route that creates a User. A provisioned account arrives with a blank Budget already active, so a User is never in the state of having no Budget at all. The password set at Provisioning is meant to be temporary, replaced by its owner on first sign-in; nothing enforces that yet.
 _Avoid_: "signup", "registration" — nothing here is self-service, and the account holder is not the one who creates the account.
 
+**Time Zone**:
+The zone the User's device last reported, as an IANA name such as `America/New_York`. An observation, not a setting: it follows the device, so it changes when the User travels. UTC until a device has reported one. Stored, but nothing reads it yet — every "today" and Period is still UTC. See `docs/user-time-zones.md`.
+_Avoid_: "home zone" — nothing records where the User lives.
+
+**Last Active**:
+The last moment the User was seen signing in or opening the app, by the server's clock.
+
 **Budget**:
 A named collection of Expenses belonging to a User, rolled forward period by period. A Budget has no stored "active" state of its own — it is active only when `User.active_budget_id` points at it. Soft-deleted via `deleted_at`, never hard-deleted, and never while it is the active one.
 _Avoid_: "active budget" as a Budget-side flag/status — activeness is always read from the User side.

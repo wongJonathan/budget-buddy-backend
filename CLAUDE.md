@@ -23,6 +23,9 @@ uv run pre-commit run --all-files          # ruff + mypy, same as CI would run
 uv run python -m app.scripts.create_user --display-name "Alice" --email alice@example.com --password "..."
 docker compose exec app uv run python -m app.scripts.create_user ...   # for anything but local dev
 
+# run Rollover for one user; --through defaults to the current Period
+docker compose exec app uv run python -m app.scripts.rollover --user-id <uuid> [--through YYYY-MM-DD]
+
 docker compose up -d                       # app + Postgres 16, local dev stack
 docker compose exec app uv run alembic revision --autogenerate -m "message"
 docker compose exec app uv run alembic upgrade head

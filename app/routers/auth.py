@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 
 from app.dependencies import CurrentUser, DbSession, SessionToken
 from app.schemas.auth import LoginRequest
@@ -11,10 +11,18 @@ from app.services import user as user_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# The IANA zone the device reports, e.g. from `Intl.DateTimeFormat().resolvedOptions()`.
+# Optional: an older client that doesn't send it keeps the stored zone.
+TimeZoneHeader = Annotated[str | None, Header(alias="X-Time-Zone")]
+
 
 @router.post("/login")
 async def login(
-    data: LoginRequest, response: Response, request: Request, db: DbSession
+    data: LoginRequest,
+    response: Response,
+    request: Request,
+    db: DbSession,
+    time_zone: TimeZoneHeader = None,
 ) -> dict[str, Any]:
     email = data.email
     password = data.password.get_secret_value()
@@ -28,6 +36,8 @@ async def login(
     is_verified, _ = verify_and_update_password(password, user.hashed_password)
     if not is_verified:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+
+    await user_service.record_activity(db, user, time_zone)
 
     # TODO: When an update is available should update the db's stored hash
     token = await create_session(db, user, request.headers.get("user-agent", ""))
@@ -45,7 +55,8 @@ async def logout(response: Response, db: DbSession, session: SessionToken) -> No
 
 
 @router.get("/me")
-async def me(user: CurrentUser) -> dict[str, Any]:
+async def me(user: CurrentUser, db: DbSession, time_zone: TimeZoneHeader = None) -> dict[str, Any]:
+    await user_service.record_activity(db, user, time_zone)
     return {"id": user.id, "email": user.email}
 
 

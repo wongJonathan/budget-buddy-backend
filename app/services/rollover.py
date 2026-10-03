@@ -7,7 +7,6 @@ in CONTEXT.md.
 
 import datetime
 from typing import Any
-import uuid
 
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +60,7 @@ async def rollover(db: AsyncSession, user: User, *, through: datetime.date) -> N
     ).scalar()
 
     if rollover_check is not None:
+        print(f"Rollover already completed for {user.id}")
         return
 
     # Gather all expenses that have not been deleted (deactivated is fine)
@@ -77,8 +77,10 @@ async def rollover(db: AsyncSession, user: User, *, through: datetime.date) -> N
     ).scalar()
 
     if last_expense_period is None:
+        print(f"No expenses could be found for {user.id}")
         # If no expense can be found, there's nothing to rollover
         return
+
     last_period = last_expense_period.period
     last_active_expenses = (
         (
@@ -133,3 +135,4 @@ async def rollover(db: AsyncSession, user: User, *, through: datetime.date) -> N
         )
     )
     await db.commit()
+    print(f"Rollover completed for {user.id}")

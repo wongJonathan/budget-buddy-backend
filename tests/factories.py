@@ -28,7 +28,7 @@ def make_user(**overrides: Any) -> User:
         "id": uuid.uuid4(),
         "display_name": "Test User",
         "active_budget_id": None,
-        "last_active": datetime.date.today(),
+        "last_active_at": datetime.datetime.now(datetime.UTC),
         # NOT NULL in the real table, so these have to be present for any test that
         # actually inserts the row. The email is randomised because it's UNIQUE.
         "email": f"user-{uuid.uuid4().hex[:12]}@example.com",

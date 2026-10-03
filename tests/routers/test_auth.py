@@ -9,6 +9,7 @@ rather than going through `app`. That keeps the wiring decision yours, and it me
 these tests start passing the moment the router is included, without being rewritten.
 """
 
+import datetime
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -199,6 +200,86 @@ async def test_me_rejects_a_token_that_was_never_issued(auth_client: AsyncClient
     response = await auth_client.get("/auth/me")
 
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Activity: time zone and last_active_at, on login and /me (docs/adr/0019)
+# ---------------------------------------------------------------------------
+
+LONG_AGO = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)
+
+
+@pytest.fixture
+async def stale_user(registered_user: User, db_session: AsyncSession) -> User:
+    """A User last seen long ago, in a zone no test sends."""
+    registered_user.last_active_at = LONG_AGO
+    registered_user.time_zone = "Asia/Tokyo"
+    await db_session.commit()
+    return registered_user
+
+
+async def _login(auth_client: AsyncClient, headers: dict[str, str]) -> None:
+    response = await auth_client.post(
+        "/auth/login",
+        json={"email": "alice@example.com", "password": PASSWORD},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+
+async def _me(
+    auth_client: AsyncClient, user: User, db_session: AsyncSession, headers: dict[str, str]
+) -> None:
+    token = await create_session(db_session, user, "pytest-agent")
+    auth_client.cookies.set(settings.cookie_name, token)
+    response = await auth_client.get("/auth/me", headers=headers)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("route", ["login", "me"])
+async def test_activity_stores_the_reported_time_zone(
+    route: str, auth_client: AsyncClient, stale_user: User, db_session: AsyncSession
+) -> None:
+    headers = {"X-Time-Zone": "America/New_York"}
+    if route == "login":
+        await _login(auth_client, headers)
+    else:
+        await _me(auth_client, stale_user, db_session, headers)
+
+    await db_session.refresh(stale_user)
+    assert stale_user.time_zone == "America/New_York"
+    assert stale_user.last_active_at > LONG_AGO
+
+
+@pytest.mark.parametrize("route", ["login", "me"])
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"X-Time-Zone": "Not/A_Zone"}, {"X-Time-Zone": "../etc/passwd"}],
+    ids=["missing", "unknown", "malformed"],
+)
+async def test_activity_keeps_the_stored_zone_without_a_valid_one(
+    route: str,
+    headers: dict[str, str],
+    auth_client: AsyncClient,
+    stale_user: User,
+    db_session: AsyncSession,
+) -> None:
+    """Still recorded as activity, and the request still succeeds: a client bug
+    must not block sign-in."""
+    if route == "login":
+        await _login(auth_client, headers)
+    else:
+        await _me(auth_client, stale_user, db_session, headers)
+
+    await db_session.refresh(stale_user)
+    assert stale_user.time_zone == "Asia/Tokyo"
+    assert stale_user.last_active_at > LONG_AGO
+
+
+async def test_a_new_user_starts_in_utc(registered_user: User, db_session: AsyncSession) -> None:
+    await db_session.refresh(registered_user)
+
+    assert registered_user.time_zone == "UTC"
 
 
 # ---------------------------------------------------------------------------

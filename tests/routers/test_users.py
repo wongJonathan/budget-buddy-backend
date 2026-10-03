@@ -8,7 +8,6 @@ Each route therefore gets two tests: the authenticated behaviour via `authed_cli
 and the 401 via the plain `client`, which presents no session.
 """
 
-import datetime
 import uuid
 from collections.abc import Callable
 from unittest.mock import MagicMock
@@ -124,28 +123,5 @@ async def test_delete_user_clears_budgets_then_categories_first(
 
 async def test_delete_user_requires_a_session(client: AsyncClient) -> None:
     response = await client.delete("/users")
-
-    assert response.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# PATCH /users/{user_id}/last-active
-# ---------------------------------------------------------------------------
-
-
-async def test_update_last_active_touches_the_current_user(
-    authed_client: AsyncClient, mock_db: MagicMock, current_user: User
-) -> None:
-    current_user.last_active = datetime.date(2020, 1, 1)
-
-    response = await authed_client.patch("/users/last-active")
-
-    assert response.status_code == 200
-    assert current_user.last_active == datetime.date.today()
-    mock_db.commit.assert_awaited_once()
-
-
-async def test_update_last_active_requires_a_session(client: AsyncClient) -> None:
-    response = await client.patch("/users/last-active")
 
     assert response.status_code == 401
