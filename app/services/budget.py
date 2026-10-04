@@ -48,6 +48,16 @@ async def _import_amount_saved(
 
     db.add(
         Transaction(
+            user_id=user.id,
+            type=TransactionType.INCOME,
+            name=f"Income for {expense.name}",
+            amount=amount,
+            date=expense.period,
+        )
+    )
+
+    db.add(
+        Transaction(
             expense_id=expense.id,
             user_id=user.id,
             type=TransactionType.SAVE,
