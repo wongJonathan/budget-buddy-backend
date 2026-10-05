@@ -161,7 +161,7 @@ async def convert_json_to_budget(
     categories: dict[str, uuid.UUID] = {}
 
     for expense_key, expense_data in json_data.items():
-        if "transactionType" in expense_data:
+        if "transactionType" in expense_data or expense_data["tag"] == "Income":
             continue
 
         missing = _REQUIRED_EXPENSE_KEYS - expense_data.keys()
